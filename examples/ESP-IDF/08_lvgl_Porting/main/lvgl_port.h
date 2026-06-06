@@ -18,7 +18,7 @@ extern "C" {
 #endif
 
 #define ESP_PANEL_USE_1024_600_LCD           (0)     // 0: 800x480, 1: 1024x600
-#define CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 0 // 1 initiates the touch, 0 closes the touch.
+#define CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 1 // 1 initiates the touch, 0 closes the touch.
 
 /**
  * LVGL related parameters, can be adjusted by users
