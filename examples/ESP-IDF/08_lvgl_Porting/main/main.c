@@ -11,6 +11,9 @@
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
+#include "bike_ui.h" 
+#include "freertos/task.h"
+
 
 // static const char *TAG = "bike_computer";
 static const char *BLE_DEVICE_NAME = "BikeComputer";
@@ -79,6 +82,7 @@ void app_main()
 
     waveshare_esp32_s3_rgb_lcd_init();
 
+    /*
     ESP_LOGI(TAG, "Display LVGL demos");
     if (lvgl_port_lock(-1)) {
 #if CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911
@@ -87,5 +91,21 @@ void app_main()
         lv_demo_music();
 #endif
         lvgl_port_unlock();
+    }
+    */
+    
+    ESP_LOGI(TAG, "Starting bike UI");
+    if (lvgl_port_lock(-1)) {
+        bike_ui_init();
+        lvgl_port_unlock();
+    }
+
+    // Update display with random values every second
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (lvgl_port_lock(-1)) {
+            bike_ui_update_random();
+            lvgl_port_unlock();
+        }
     }
 }

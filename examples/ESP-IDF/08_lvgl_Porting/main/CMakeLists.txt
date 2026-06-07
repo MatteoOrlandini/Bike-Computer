@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "waveshare_rgb_lcd_port.c" "main.c" "lvgl_port.c"
+    SRCS "waveshare_rgb_lcd_port.c" "main.c" "lvgl_port.c" "bike_ui.c"
     INCLUDE_DIRS "."
     REQUIRES nvs_flash bt)
 idf_component_get_property(lvgl_lib lvgl__lvgl COMPONENT_LIB)
