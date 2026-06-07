@@ -2,6 +2,6 @@
 #define _BIKE_UI_H_
 
 void bike_ui_init(void);
-void bike_ui_update_random(void);
+void bike_ui_update(void);
 
 #endif

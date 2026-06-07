@@ -1,5 +1,6 @@
 #include "bike_ui.h"
 #include "lvgl.h"
+#include "ble_gps.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -9,6 +10,11 @@ static lv_obj_t *label_avg;
 static lv_obj_t *label_total;
 static lv_obj_t *label_gradient;
 static lv_obj_t *label_ascent;
+
+static void bike_ui_timer_cb(lv_timer_t *timer)
+{
+    bike_ui_update();
+}
 
 void bike_ui_init(void)
 {
@@ -86,28 +92,30 @@ void bike_ui_init(void)
     lv_obj_set_style_text_color(label_ascent, lv_color_white(), 0);
     lv_label_set_text(label_ascent, "0");
     lv_obj_align(label_ascent, LV_ALIGN_TOP_RIGHT, -20, 280);
+
+    lv_timer_create(bike_ui_timer_cb, 1000, NULL);
 }
 
-void bike_ui_update_random(void)
+void bike_ui_update(void)
 {
-    char buf[32];
+    ble_gps_data_t gps = {0};
+    char buf[32] = {0};
 
-    snprintf(buf, sizeof(buf), "%.1f", (float)(rand() % 400) / 10.0f);
+    if (!ble_gps_get_data(&gps)) {
+        // No fix yet — show dashes
+        lv_label_set_text(label_speed, "--.-");
+        lv_label_set_text(label_gradient, "--.-");
+        lv_label_set_text(label_ascent, "--.-");
+        return;
+    }
+
+    snprintf(buf, sizeof(buf), "%.1f", gps.speed_kmh);
     lv_label_set_text(label_speed, buf);
 
-    int s = rand() % 3600;
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
-    lv_label_set_text(label_time, buf);
-
-    snprintf(buf, sizeof(buf), "%.1f", (float)(rand() % 300) / 10.0f);
-    lv_label_set_text(label_avg, buf);
-
-    snprintf(buf, sizeof(buf), "%.1f", (float)(rand() % 1000) / 10.0f);
-    lv_label_set_text(label_total, buf);
-
-    snprintf(buf, sizeof(buf), "%.1f", (float)((rand() % 400) - 200) / 10.0f);
+    // Gradient and ascent need altitude history — placeholder for now
+    snprintf(buf, sizeof(buf), "%.1f", gps.altitude_m);
     lv_label_set_text(label_gradient, buf);
-
-    snprintf(buf, sizeof(buf), "%d", rand() % 2000);
+    
+    snprintf(buf, sizeof(buf), "%.1f", gps.longitude);
     lv_label_set_text(label_ascent, buf);
 }

@@ -13,6 +13,7 @@
 #include "services/gap/ble_svc_gap.h"
 #include "bike_ui.h" 
 #include "freertos/task.h"
+#include "ble_gps.h"
 
 
 // static const char *TAG = "bike_computer";
@@ -63,22 +64,7 @@ static void nimble_host_task(void *param)
 
 void app_main()
 {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ret = nimble_port_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init nimble: %d", ret);
-        return;
-    }
-    ble_hs_cfg.sync_cb  = ble_on_sync;
-    ble_hs_cfg.reset_cb = ble_on_reset;
-    ble_svc_gap_device_name_set(BLE_DEVICE_NAME);
-    nimble_port_freertos_init(nimble_host_task);
+    ble_gps_init();
 
     waveshare_esp32_s3_rgb_lcd_init();
 
@@ -98,14 +84,5 @@ void app_main()
     if (lvgl_port_lock(-1)) {
         bike_ui_init();
         lvgl_port_unlock();
-    }
-
-    // Update display with random values every second
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        if (lvgl_port_lock(-1)) {
-            bike_ui_update_random();
-            lvgl_port_unlock();
-        }
     }
 }
