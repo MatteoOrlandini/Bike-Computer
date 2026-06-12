@@ -14,6 +14,7 @@
 #include "bike_ui.h" 
 #include "freertos/task.h"
 #include "ble_gps.h"
+#include "ch422g_pwm.h"
 
 
 // static const char *TAG = "bike_computer";
@@ -67,6 +68,9 @@ void app_main()
     ble_gps_init();
 
     waveshare_esp32_s3_rgb_lcd_init();
+
+    // ch422g_pwm_init();          // starts the PWM task at 0% duty
+    // ch422g_pwm_set_duty(100);    // call this anytime to change
 
     /*
     ESP_LOGI(TAG, "Display LVGL demos");
