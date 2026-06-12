@@ -3,6 +3,8 @@
 #include "ble_gps.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include "ble_gps.h"
+#include "nmea_parser.h"
 
 static lv_obj_t *label_speed;
 static lv_obj_t *label_time;
@@ -13,10 +15,11 @@ static lv_obj_t *label_ascent;
 
 static void bike_ui_timer_cb(lv_timer_t *timer)
 {
-    bike_ui_update();
+    nmea_data_t *data = (nmea_data_t *)timer->user_data;
+    bike_ui_update(data);
 }
 
-void bike_ui_init(void)
+void bike_ui_init(nmea_data_t *data)
 {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -93,29 +96,34 @@ void bike_ui_init(void)
     lv_label_set_text(label_ascent, "0");
     lv_obj_align(label_ascent, LV_ALIGN_TOP_RIGHT, -20, 280);
 
-    lv_timer_create(bike_ui_timer_cb, 1000, NULL);
+    lv_timer_create(bike_ui_timer_cb, 1000, data);  // data passed as user_data
 }
 
-void bike_ui_update(void)
+void bike_ui_update(const nmea_data_t *data)
 {
-    ble_gps_data_t gps = {0};
-    char buf[32] = {0};
+    char buf[32];
 
-    if (!ble_gps_get_data(&gps)) {
-        // No fix yet — show dashes
+    if (!data || !data->valid) {
         lv_label_set_text(label_speed, "--.-");
+        lv_label_set_text(label_avg,   "--.-");
+        lv_label_set_text(label_total, "--.-");
         lv_label_set_text(label_gradient, "--.-");
-        lv_label_set_text(label_ascent, "--.-");
+        lv_label_set_text(label_ascent,   "---");
         return;
     }
 
-    snprintf(buf, sizeof(buf), "%.1f", gps.speed_kmh);
+    // Speed
+    snprintf(buf, sizeof(buf), "%.1f", data->speed_kmh);
     lv_label_set_text(label_speed, buf);
 
-    // Gradient and ascent need altitude history — placeholder for now
-    snprintf(buf, sizeof(buf), "%.1f", gps.altitude_m);
-    lv_label_set_text(label_gradient, buf);
-    
-    snprintf(buf, sizeof(buf), "%.1f", gps.longitude);
-    lv_label_set_text(label_ascent, buf);
+    // Time
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+             data->hour, data->minute, data->second);
+    lv_label_set_text(label_time, buf);
+
+    // Avg, total, gradient, ascent — placeholders until the logic layer is ready
+    lv_label_set_text(label_avg,      "-.--");
+    lv_label_set_text(label_total,    "-.--");
+    lv_label_set_text(label_gradient, "-.--");
+    lv_label_set_text(label_ascent,   "---");
 }

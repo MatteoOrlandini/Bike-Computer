@@ -15,53 +15,13 @@
 #include "freertos/task.h"
 #include "ble_gps.h"
 #include "ch422g_pwm.h"
+#include "ble_gps.h"
+#include "nmea_parser.h"
 
 
 // static const char *TAG = "bike_computer";
-static const char *BLE_DEVICE_NAME = "BikeComputer";
-
-static void ble_advertise(void);
-
-static void ble_on_sync(void)
-{
-    ble_addr_t addr;
-    ble_hs_id_gen_rnd(1, &addr);
-    ble_hs_id_set_rnd(addr.val);
-    ble_advertise();
-}
-
-static void ble_on_reset(int reason)
-{
-    ESP_LOGE(TAG, "BLE reset, reason=%d", reason);
-}
-
-static void ble_advertise(void)
-{
-    struct ble_gap_adv_params adv_params = {0};
-    struct ble_hs_adv_fields fields = {0};
-
-    fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (uint8_t *)BLE_DEVICE_NAME;
-    fields.name_len = strlen(BLE_DEVICE_NAME);
-    fields.name_is_complete = 1;
-    ble_gap_adv_set_fields(&fields);
-
-    adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
-    adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    int rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER,
-                               &adv_params, NULL, NULL);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "BLE adv start failed: %d", rc);
-    } else {
-        ESP_LOGI(TAG, "BLE advertising as \"%s\"", BLE_DEVICE_NAME);
-    }
-}
-
-static void nimble_host_task(void *param)
-{
-    nimble_port_run();
-    nimble_port_freertos_deinit();
-}
+// static const char *BLE_DEVICE_NAME = "BikeComputer";
+static nmea_data_t s_gps_data;  // lives in main, shared across sources
 
 void app_main()
 {
@@ -86,7 +46,7 @@ void app_main()
     
     ESP_LOGI(TAG, "Starting bike UI");
     if (lvgl_port_lock(-1)) {
-        bike_ui_init();
+        bike_ui_init(&s_gps_data);
         lvgl_port_unlock();
     }
 }

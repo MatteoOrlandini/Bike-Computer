@@ -1,39 +1,33 @@
 #ifndef _BLE_GPS_H
 #define _BLE_GPS_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include "nmea_parser.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
+ 
 /**
- * GPS data received from the smartphone over BLE.
- * Fields are updated whenever the phone writes new data.
- */
-typedef struct {
-    double  latitude;    // degrees, e.g. 43.1234
-    double  longitude;   // degrees, e.g. 12.5678
-    float   speed_kmh;   // km/h
-    float   altitude_m;  // metres
-    bool    valid;       // true once at least one fix has been received
-} ble_gps_data_t;
-
-/**
- * Initialise the NimBLE stack and register the GPS GATT service.
- * Call once from app_main(), before the LVGL loop starts.
+ * Initialise the NimBLE stack and start advertising as "BikeGPS".
+ * Call once from app_main() before the LVGL loop starts.
  */
 void ble_gps_init(void);
-
+ 
 /**
  * Copy the latest GPS fix into *out.
- * Thread-safe (uses a mutex internally).
- * Returns true if a valid fix is available, false otherwise.
+ * Thread-safe. Returns true if at least one valid fix has been received.
  */
-bool ble_gps_get_data(ble_gps_data_t *out);
-
+bool ble_gps_get_data(nmea_data_t *out);
+ 
+/**
+ * Returns true while a phone is actively connected over BLE.
+ * Use this for the BLE > UART priority logic.
+ */
+bool ble_gps_is_connected(void);
+ 
 #ifdef __cplusplus
 }
 #endif
+ 
 #endif
