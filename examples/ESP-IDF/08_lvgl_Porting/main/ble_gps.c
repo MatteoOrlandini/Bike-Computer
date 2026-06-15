@@ -76,6 +76,11 @@ static int gps_chr_access(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGW(TAG, "Unexpected write length: %u", len);
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
+    /*
+    else{
+        ESP_LOGW(TAG, "Write length: %u", len);
+    }
+    */
 
     char sentence[128];
     ble_hs_mbuf_to_flat(ctxt->om, sentence, len, NULL);
@@ -131,6 +136,8 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         if (event->connect.status == 0) {
             s_connected = true;
             ESP_LOGI(TAG, "Phone connected");
+            /* Request larger MTU so full NMEA sentences fit in one write */
+            ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
         } else {
             s_connected = false;
             /* connection failed — restart advertising */
@@ -243,6 +250,8 @@ void ble_gps_init(void)
     ble_svc_gap_init();
     ble_svc_gatt_init();
     ble_svc_gap_device_name_set("BikeGPS");
+
+    ble_att_set_preferred_mtu(185);  /* enough for the longest NMEA sentence */
 
     nimble_port_freertos_init(nimble_host_task);
 
