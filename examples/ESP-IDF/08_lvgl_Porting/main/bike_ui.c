@@ -1,10 +1,7 @@
 #include "bike_ui.h"
+#include "trip_computer.h"
 #include "lvgl.h"
-#include "ble_gps.h"
-#include <stdlib.h>
 #include <stdio.h>
-#include "ble_gps.h"
-#include "nmea_parser.h"
 
 static lv_obj_t *label_speed;
 static lv_obj_t *label_time;
@@ -13,13 +10,32 @@ static lv_obj_t *label_total;
 static lv_obj_t *label_gradient;
 static lv_obj_t *label_ascent;
 
+/* ------------------------------------------------------------------ */
+/*  Reset button callback                                               */
+/* ------------------------------------------------------------------ */
+
+static void reset_btn_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        trip_computer_reset();
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  LVGL timer — fires every second on the LVGL task                   */
+/* ------------------------------------------------------------------ */
+
 static void bike_ui_timer_cb(lv_timer_t *timer)
 {
-    nmea_data_t *data = (nmea_data_t *)timer->user_data;
+    trip_data_t *data = (trip_data_t *)timer->user_data;
     bike_ui_update(data);
 }
 
-void bike_ui_init(nmea_data_t *data)
+/* ------------------------------------------------------------------ */
+/*  Init                                                                */
+/* ------------------------------------------------------------------ */
+
+void bike_ui_init(trip_data_t *data)
 {
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
@@ -33,7 +49,7 @@ void bike_ui_init(nmea_data_t *data)
     label_speed = lv_label_create(scr);
     lv_obj_set_style_text_font(label_speed, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(label_speed, lv_color_hex(0x00FF00), 0);
-    lv_label_set_text(label_speed, "0.0");
+    lv_label_set_text(label_speed, "--.-");
     lv_obj_align(label_speed, LV_ALIGN_TOP_MID, 0, 30);
 
     // --- Elapsed time ---
@@ -57,7 +73,7 @@ void bike_ui_init(nmea_data_t *data)
     label_avg = lv_label_create(scr);
     lv_obj_set_style_text_font(label_avg, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(label_avg, lv_color_white(), 0);
-    lv_label_set_text(label_avg, "0.0");
+    lv_label_set_text(label_avg, "--.-");
     lv_obj_align(label_avg, LV_ALIGN_TOP_RIGHT, -20, 160);
 
     // --- Total km ---
@@ -69,7 +85,7 @@ void bike_ui_init(nmea_data_t *data)
     label_total = lv_label_create(scr);
     lv_obj_set_style_text_font(label_total, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(label_total, lv_color_white(), 0);
-    lv_label_set_text(label_total, "0.0");
+    lv_label_set_text(label_total, "0.000");
     lv_obj_align(label_total, LV_ALIGN_TOP_LEFT, 20, 280);
 
     // --- Gradient ---
@@ -96,17 +112,33 @@ void bike_ui_init(nmea_data_t *data)
     lv_label_set_text(label_ascent, "0");
     lv_obj_align(label_ascent, LV_ALIGN_TOP_RIGHT, -20, 280);
 
-    lv_timer_create(bike_ui_timer_cb, 1000, data);  // data passed as user_data
+    // --- Reset button (bottom center) ---
+    lv_obj_t *btn = lv_btn_create(scr);
+    lv_obj_set_size(btn, 120, 40);
+    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_add_event_cb(btn, reset_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *btn_label = lv_label_create(btn);
+    lv_label_set_text(btn_label, "Reset");
+    lv_obj_center(btn_label);
+
+    // Start the 1-second refresh timer
+    lv_timer_create(bike_ui_timer_cb, 1000, data);
 }
 
-void bike_ui_update(const nmea_data_t *data)
+/* ------------------------------------------------------------------ */
+/*  Update                                                              */
+/* ------------------------------------------------------------------ */
+
+void bike_ui_update(const trip_data_t *data)
 {
     char buf[32];
 
     if (!data || !data->valid) {
-        lv_label_set_text(label_speed, "--.-");
-        lv_label_set_text(label_avg,   "--.-");
-        lv_label_set_text(label_total, "--.-");
+        lv_label_set_text(label_speed,    "--.-");
+        lv_label_set_text(label_time,     "--:--:--");
+        lv_label_set_text(label_avg,      "--.-");
+        lv_label_set_text(label_total,    "--.---");
         lv_label_set_text(label_gradient, "--.-");
         lv_label_set_text(label_ascent,   "---");
         return;
@@ -116,14 +148,27 @@ void bike_ui_update(const nmea_data_t *data)
     snprintf(buf, sizeof(buf), "%.1f", data->speed_kmh);
     lv_label_set_text(label_speed, buf);
 
-    // Time
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
-             data->hour, data->minute, data->second);
+    // Elapsed time from trip computer (seconds since reset)
+    uint32_t s = data->elapsed_sec;
+    snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu",
+             (unsigned long)(s / 3600),
+             (unsigned long)((s % 3600) / 60),
+             (unsigned long)(s % 60));
     lv_label_set_text(label_time, buf);
 
-    // Avg, total, gradient, ascent — placeholders until the logic layer is ready
-    lv_label_set_text(label_avg,      "-.--");
-    lv_label_set_text(label_total,    "-.--");
-    lv_label_set_text(label_gradient, "-.--");
-    lv_label_set_text(label_ascent,   "---");
+    // Average speed
+    snprintf(buf, sizeof(buf), "%.1f", data->avg_speed_kmh);
+    lv_label_set_text(label_avg, buf);
+
+    // Total distance
+    snprintf(buf, sizeof(buf), "%.3f", data->distance_km);
+    lv_label_set_text(label_total, buf);
+
+    // Gradient
+    snprintf(buf, sizeof(buf), "%.1f", data->gradient_pct);
+    lv_label_set_text(label_gradient, buf);
+
+    // Ascent
+    snprintf(buf, sizeof(buf), "%.0f", data->ascent_m);
+    lv_label_set_text(label_ascent, buf);
 }

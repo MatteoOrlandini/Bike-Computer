@@ -96,8 +96,12 @@ static int gps_chr_access(uint16_t conn_handle, uint16_t attr_handle,
         xSemaphoreTake(s_mutex, portMAX_DELAY);
         s_nmea_data = tmp;
         xSemaphoreGive(s_mutex);
-        ESP_LOGD(TAG, "Parsed: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
+        ESP_LOGI(TAG, "Parsed: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
                  tmp.latitude, tmp.longitude, tmp.speed_kmh, tmp.altitude_m);
+        /*
+        ESP_LOGI(TAG, "Parsed: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
+                 tmp.latitude, tmp.longitude, tmp.speed_kmh, tmp.altitude_m);
+        */
     } else {
         ESP_LOGW(TAG, "Failed to parse: %s", sentence);
     }

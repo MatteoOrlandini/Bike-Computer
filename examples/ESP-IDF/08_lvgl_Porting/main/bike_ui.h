@@ -2,8 +2,9 @@
 #define _BIKE_UI_H_
 
 #include "nmea_parser.h"
-
-void bike_ui_init(nmea_data_t *data);
-void bike_ui_update(const nmea_data_t *data);
+#include "trip_computer.h"
+ 
+void bike_ui_init(trip_data_t *data);
+void bike_ui_update(const trip_data_t *data);
 
 #endif

@@ -11,17 +11,11 @@
 #include "ble_gps.h"
 #include "nmea_uart.h"
 #include "nmea_parser.h"
+#include "trip_computer.h"
 
-/* Shared GPS state — written by gps_task, read by the LVGL timer in bike_ui */
 static nmea_data_t s_gps_data;
+static trip_data_t s_trip_data;
 
-/*
- * gps_task — priority arbitration
- *
- * BLE takes priority when a phone is connected.
- * Falls back to whichever UART source has a valid fix otherwise.
- * Runs every 500 ms — fast enough for 1 Hz GPS updates.
- */
 static void gps_task(void *arg)
 {
     nmea_data_t tmp;
@@ -33,10 +27,11 @@ static void gps_task(void *arg)
             nmea_uart_get_data(&tmp);
         }
 
-        /* Single word-aligned copy — no mutex needed on Xtensa for
-         * struct assignment that fits in a cache line, but we keep it
-         * simple and accept the rare torn read in the LVGL timer. */
         s_gps_data = tmp;
+
+        /* Feed the trip computer on every valid fix */
+        trip_computer_update(&tmp);
+        trip_computer_get_data(&s_trip_data);
 
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -44,21 +39,16 @@ static void gps_task(void *arg)
 
 void app_main(void)
 {
-    /* Start BLE — advertises immediately */
     ble_gps_init();
-
-    /* Start both UART readers (UART2 TTL + UART1 RS485) */
     nmea_uart_init();
+    trip_computer_init();
 
-    /* Initialise LCD, touch, and LVGL */
     waveshare_esp32_s3_rgb_lcd_init();
 
-    /* Build the bike UI and register the LVGL refresh timer */
     if (lvgl_port_lock(-1)) {
-        bike_ui_init(&s_gps_data);
+        bike_ui_init(&s_trip_data);
         lvgl_port_unlock();
     }
 
-    /* Start the GPS arbitration task */
-    xTaskCreate(gps_task, "gps_task", 3072, NULL, 5, NULL);
+    xTaskCreate(gps_task, "gps_task", 4096, NULL, 5, NULL);
 }
