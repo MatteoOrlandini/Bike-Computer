@@ -40,9 +40,41 @@
 #define NMEA_TEST_CTS (UART_PIN_NO_CHANGE)        // No CTS (clear to send) 
 
 #define NMEA_UART_PORT_NUM      (2)    // UART port number 
-#define NMEA_UART_BAUD_RATE     (9600)   // UART baud rate 
-#define NMEA_TASK_STACK_SIZE    (3072)  // Task stack size 
+#define NMEA_UART_BAUD_RATE_9600     (9600)   // UART baud rate low speed
+#define NMEA_UART_BAUD_RATE_115200     (115200)   // UART baud rate high speed
+#define NMEA_TASK_STACK_SIZE    (4096)  // Task stack size 
 
+// u-blox UBX binary commands
+// 1. Set Navigation Mode to Pedestrian (NAV5)
+const uint8_t UBX_NAV5_PEDESTRIAN[] = {
+    0xB5, 0x62, 0x06, 0x24, 0x24, 0x00, 0xFF, 0xFF, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x4D
+};
+
+// 2. Set Update Rate to 5Hz / 200ms (RATE)
+const uint8_t UBX_RATE_5HZ[] = {
+    0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, 0xC8, 0x00, 0x01, 0x00, 0x01, 0x00, 0xDE, 0x6A
+};
+
+// 3. Set Baud Rate to 115200 (PRT)
+const uint8_t UBX_PRT_115200[] = {
+    0xB5, 0x62, 0x06, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0xD0, 0x08, 0x00, 0x00, 0x00, 0xC2,
+    0x01, 0x00, 0x07, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x7E
+};
+
+// UBX-CFG-ODO command to enable low-pass filtering on speed and distance calculations
+const uint8_t UBX_CFG_FILTER_SPEED[] = {
+    0xB5, 0x62, 0x06, 0x1E, 0x14, 0x00, 
+    0x00,       // Version 0
+    0x00, 0x00, 0x00, // Reserved
+    0x03,       // Flags: Enable both Odometer and Low-Pass Speed Filter
+    0x00,       // GNSS Profile (0 = default/auto)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Reserved
+    0x05,       // CogFilter: Velocity low-pass filter time constant (5 seconds is great for bikes)
+    0x00, 0x00, 0x00, 0x00, 0x00, // Reserved
+    0x41, 0x6E  // Checksum (CK_A, CK_B)
+};
 
 /* ------------------------------------------------------------------ */
 /*  Shared GPS state                                                    */
@@ -128,7 +160,7 @@ static void uart_reader_task(void *arg)
 
     for (;;) {
         // Read data from the UART 
-        int len = uart_read_bytes(NMEA_UART_PORT_NUM, line, NMEA_BUF_SIZE, pdMS_TO_TICKS(100));        
+        int len = uart_read_bytes(NMEA_UART_PORT_NUM, line, NMEA_BUF_SIZE, 100 / portTICK_PERIOD_MS);        
         if (len > 0)
         {
             for (int i = 0; i < len; i++)
@@ -137,6 +169,11 @@ static void uart_reader_task(void *arg)
             }
         }
     }
+}
+
+// Helper function to send commands over UART
+static void send_ubx_cmd(const uint8_t *cmd, size_t len) {
+    uart_write_bytes(NMEA_UART_PORT_NUM, (const char *)cmd, len);
 }
 
 /* ------------------------------------------------------------------ */
@@ -150,7 +187,7 @@ void nmea_uart_init(void)
     memset(&s_nmea_data, 0, sizeof(s_nmea_data));
 
     const uart_config_t uart_cfg = {
-        .baud_rate  = NMEA_UART_BAUD_RATE,  // Set baud rate 
+        .baud_rate  = NMEA_UART_BAUD_RATE_9600,  // Set baud rate 
         .data_bits  = UART_DATA_8_BITS,     // 8 data bits 
         .parity     = UART_PARITY_DISABLE,  // No parity bit 
         .stop_bits  = UART_STOP_BITS_1,      // 1 stop bit 
@@ -163,10 +200,32 @@ void nmea_uart_init(void)
     ESP_ERROR_CHECK(uart_param_config(NMEA_UART_PORT_NUM, &uart_cfg));
     ESP_ERROR_CHECK(uart_set_pin(NMEA_UART_PORT_NUM, NMEA_TXD_PIN, NMEA_RXD_PIN, NMEA_TEST_RTS, NMEA_TEST_CTS));   
 
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 2. Command the GPS module to shift internal speed to 115200 baud
+    ESP_LOGI(TAG, "Upgrading GPS hardware baudrate to 115200...");
+    send_ubx_cmd(UBX_PRT_115200, sizeof(UBX_PRT_115200));
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    // 3. Update ESP32-S3 UART hardware to match the new speed (115200)
+    ESP_ERROR_CHECK(uart_set_baudrate(NMEA_UART_PORT_NUM, 115200));
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    // 4. Inject Pedestrian profile, 5Hz execution configurations and enable low-pass filtering on speed and distance calculations
+    ESP_LOGI(TAG, "Injecting Pedestrian Profile, 5Hz update rate configurations and low-pass filtering on speed and distance calculations...");
+    send_ubx_cmd(UBX_NAV5_PEDESTRIAN, sizeof(UBX_NAV5_PEDESTRIAN));
+    vTaskDelay(pdMS_TO_TICKS(150));
+    send_ubx_cmd(UBX_RATE_5HZ, sizeof(UBX_RATE_5HZ));
+    vTaskDelay(pdMS_TO_TICKS(150));
+    send_ubx_cmd(UBX_CFG_FILTER_SPEED, sizeof(UBX_CFG_FILTER_SPEED));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    ESP_LOGI(TAG, "U-blox configuration successful. Starting GPS Task loop...");
+
     xTaskCreate(uart_reader_task, "NMEA UART Reader Task", NMEA_TASK_STACK_SIZE,
                 NULL, NMEA_TASK_PRIO, NULL);
 
-    ESP_LOGI(TAG, "Initialised NMEA UART Reader Task @ %d baud", NMEA_UART_BAUD_RATE);
+    ESP_LOGI(TAG, "Initialised NMEA UART Reader Task");
 }
 
 bool nmea_uart_get_data(nmea_data_t *out)

@@ -58,6 +58,22 @@ static void gps_task(void *arg)
                 uart_promoted = false;
             }
         }
+        
+        if (!ble_gps_is_running()) {   // you'll need ble_gps_is_running() or track locally
+            s_ui_status.ble = BLE_STATUS_OFF;
+        } else if (ble_gps_is_connected()) {
+            s_ui_status.ble = BLE_STATUS_CONNECTED;
+        } else {
+            s_ui_status.ble = BLE_STATUS_ON;
+        }
+
+        if (!uart_valid) {
+            s_ui_status.gps_uart = GPS_UART_STATUS_OFF;
+        } else if (!uart_tmp.valid) {
+            s_ui_status.gps_uart = GPS_UART_STATUS_INVALID;
+        } else {
+            s_ui_status.gps_uart = GPS_UART_STATUS_VALID;
+        }
 
         /* --- Select source --- */
         if (uart_promoted) {
@@ -73,26 +89,7 @@ static void gps_task(void *arg)
         s_gps_data = tmp;
         trip_computer_update(&tmp);
         trip_computer_get_data(&s_trip_data);
-        
-        if (!ble_gps_is_running()) {   // you'll need ble_gps_is_running() or track locally
-            s_ui_status.ble = BLE_STATUS_OFF;
-        } else if (ble_gps_is_connected()) {
-            s_ui_status.ble = BLE_STATUS_CONNECTED;
-        } else {
-            s_ui_status.ble = BLE_STATUS_ON;
-        }
-
-        // GPS UART
-        nmea_data_t uart_check;
-        bool uart_any = nmea_uart_get_data(&uart_check);  // returns true if ever received
-        if (!uart_any) {
-            s_ui_status.gps_uart = GPS_UART_STATUS_OFF;
-        } else if (!uart_check.valid) {
-            s_ui_status.gps_uart = GPS_UART_STATUS_INVALID;
-        } else {
-            s_ui_status.gps_uart = GPS_UART_STATUS_VALID;
-        }
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
