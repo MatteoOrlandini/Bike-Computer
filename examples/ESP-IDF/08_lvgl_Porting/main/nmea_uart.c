@@ -30,36 +30,19 @@
 /*  Configuration                                                       */
 /* ------------------------------------------------------------------ */
 
-#define NMEA_BAUD        9600
-#define NMEA_BUF_SIZE    256
-#define NMEA_LINE_MAX    128
-#define NMEA_TASK_STACK  3072
-#define NMEA_TASK_PRIO   5
+#define NMEA_BUF_SIZE    (256)
+#define NMEA_LINE_MAX    (128)
+#define NMEA_TASK_PRIO   (5)
 
-/* Per-UART descriptor — passed as task argument */
-typedef struct {
-    uart_port_t port;
-    int         rx_pin;
-    int         tx_pin;
-    const char *name;
-} uart_cfg_t;
+#define NMEA_TXD_PIN (44)   // UART TX pin 
+#define NMEA_RXD_PIN (43)   // UART RX pin 
+#define NMEA_TEST_RTS (UART_PIN_NO_CHANGE)        // No RTS (request to send) 
+#define NMEA_TEST_CTS (UART_PIN_NO_CHANGE)        // No CTS (clear to send) 
 
-static const uart_cfg_t s_uarts[] = {
-    {
-        .port   = UART_NUM_2,
-        .rx_pin = 16,
-        .tx_pin = 15,
-        .name   = "TTL(IO15/16)",
-    },
-    {
-        .port   = UART_NUM_1,
-        .rx_pin = 43,
-        .tx_pin = 44,
-        .name   = "RS485(IO43/44)",
-    },
-};
+#define NMEA_UART_PORT_NUM      (2)    // UART port number 
+#define NMEA_UART_BAUD_RATE     (9600)   // UART baud rate 
+#define NMEA_TASK_STACK_SIZE    (3072)  // Task stack size 
 
-#define NUM_UARTS (sizeof(s_uarts) / sizeof(s_uarts[0]))
 
 /* ------------------------------------------------------------------ */
 /*  Shared GPS state                                                    */
@@ -67,51 +50,90 @@ static const uart_cfg_t s_uarts[] = {
 
 static nmea_data_t       s_nmea_data;
 static SemaphoreHandle_t s_mutex;
+static char nmea_string[NMEA_BUF_SIZE];
+
 
 /* ------------------------------------------------------------------ */
 /*  Generic reader task — one instance per UART                        */
 /* ------------------------------------------------------------------ */
 
-static void uart_reader_task(void *arg)
+
+
+/**
+ * Parse a received byte from serial port to retrieve an NMEA 0183 
+ * sentence into *data.
+ *
+ * Only $GPRMC and $GPGGA are processed; all other sentence types are
+ * silently ignored.  The function updates only the fields relevant to
+ * the sentence type received, leaving the rest unchanged, so callers
+ * should pass the same nmea_data_t across successive calls.
+ *
+ * @param rx_byte   The received byte from serial port.
+ * @param data      Output struct to update. Must not be NULL.
+ * @return          true  if the sentence was recognised and its checksum
+ *                        was valid (data has been updated).
+ *                  false if the sentence was ignored, malformed, or had
+ *                        a bad checksum (data is unchanged).
+ */
+static bool uart_parse_data(const char rx_byte, nmea_data_t *data)
 {
-    const uart_cfg_t *cfg = (const uart_cfg_t *)arg;
-    char    line[NMEA_LINE_MAX];
-    int     pos = 0;
-    uint8_t byte;
+    static int pos = 0;
+    bool result = false;
 
-    ESP_LOGI(TAG, "[%s] reader task started", cfg->name);
+    if (rx_byte == '$') 
+    {
+        pos = 0;
+        nmea_string[pos++] = rx_byte;
+    } 
+    else if (pos > 0) 
+    {
+        if (pos < NMEA_LINE_MAX - 1) 
+        {
+            nmea_string[pos++] = rx_byte;
+        }
+        
+        if (rx_byte == '\n') 
+        {
+            nmea_string[pos] = '\0';
 
-    for (;;) {
-        int len = uart_read_bytes(cfg->port, &byte, 1, pdMS_TO_TICKS(100));
-        if (len <= 0) continue;
+            /* Read current state, parse into a copy, write back if valid */
+            nmea_data_t tmp;
+            xSemaphoreTake(s_mutex, portMAX_DELAY);
+            tmp = *data;
+            xSemaphoreGive(s_mutex);
 
-        if (byte == '$') {
-            pos = 0;
-            line[pos++] = (char)byte;
-        } else if (pos > 0) {
-            if (pos < NMEA_LINE_MAX - 1) {
-                line[pos++] = (char)byte;
+            result = nmea_parse_sentence(nmea_string, &tmp);
+            if (result) 
+            {
+                xSemaphoreTake(s_mutex, portMAX_DELAY);
+                *data = tmp;
+                xSemaphoreGive(s_mutex);
+                ESP_LOGD(TAG, "NMEA UART Reader Task: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
+                            tmp.latitude, tmp.longitude,
+                            tmp.speed_kmh, tmp.altitude_m);
             }
 
-            if (byte == '\n') {
-                line[pos] = '\0';
+            pos = 0;
+        }
+    }
+    return result;
+}
 
-                /* Read current state, parse into a copy, write back if valid */
-                nmea_data_t tmp;
-                xSemaphoreTake(s_mutex, portMAX_DELAY);
-                tmp = s_nmea_data;
-                xSemaphoreGive(s_mutex);
 
-                if (nmea_parse_sentence(line, &tmp)) {
-                    xSemaphoreTake(s_mutex, portMAX_DELAY);
-                    s_nmea_data = tmp;
-                    xSemaphoreGive(s_mutex);
-                    ESP_LOGD(TAG, "[%s] lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
-                             cfg->name, tmp.latitude, tmp.longitude,
-                             tmp.speed_kmh, tmp.altitude_m);
-                }
+static void uart_reader_task(void *arg)
+{
+    char    line[NMEA_BUF_SIZE];
 
-                pos = 0;
+    ESP_LOGI(TAG, "NMEA UART reader task started");
+
+    for (;;) {
+        // Read data from the UART 
+        int len = uart_read_bytes(NMEA_UART_PORT_NUM, line, NMEA_BUF_SIZE, pdMS_TO_TICKS(100));        
+        if (len > 0)
+        {
+            for (int i = 0; i < len; i++)
+            {
+                uart_parse_data(line[i], &s_nmea_data);
             }
         }
     }
@@ -128,32 +150,23 @@ void nmea_uart_init(void)
     memset(&s_nmea_data, 0, sizeof(s_nmea_data));
 
     const uart_config_t uart_cfg = {
-        .baud_rate  = NMEA_BAUD,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .baud_rate  = NMEA_UART_BAUD_RATE,  // Set baud rate 
+        .data_bits  = UART_DATA_8_BITS,     // 8 data bits 
+        .parity     = UART_PARITY_DISABLE,  // No parity bit 
+        .stop_bits  = UART_STOP_BITS_1,      // 1 stop bit 
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE, // Disable hardware flow control 
+        .source_clk = UART_SCLK_DEFAULT,   // Default clock source 
     };
 
-    for (int i = 0; i < NUM_UARTS; i++) {
-        const uart_cfg_t *u = &s_uarts[i];
 
-        ESP_ERROR_CHECK(uart_param_config(u->port, &uart_cfg));
-        ESP_ERROR_CHECK(uart_set_pin(u->port,
-                                     u->tx_pin, u->rx_pin,
-                                     UART_PIN_NO_CHANGE,
-                                     UART_PIN_NO_CHANGE));
-        ESP_ERROR_CHECK(uart_driver_install(u->port,
-                                            NMEA_BUF_SIZE, 0,
-                                            0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(NMEA_UART_PORT_NUM, NMEA_BUF_SIZE, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(NMEA_UART_PORT_NUM, &uart_cfg));
+    ESP_ERROR_CHECK(uart_set_pin(NMEA_UART_PORT_NUM, NMEA_TXD_PIN, NMEA_RXD_PIN, NMEA_TEST_RTS, NMEA_TEST_CTS));   
 
-        char task_name[24];
-        snprintf(task_name, sizeof(task_name), "nmea_%s", u->name);
-        xTaskCreate(uart_reader_task, task_name, NMEA_TASK_STACK,
-                    (void *)u, NMEA_TASK_PRIO, NULL);
+    xTaskCreate(uart_reader_task, "NMEA UART Reader Task", NMEA_TASK_STACK_SIZE,
+                NULL, NMEA_TASK_PRIO, NULL);
 
-        ESP_LOGI(TAG, "Initialised %s @ %d baud", u->name, NMEA_BAUD);
-    }
+    ESP_LOGI(TAG, "Initialised NMEA UART Reader Task @ %d baud", NMEA_UART_BAUD_RATE);
 }
 
 bool nmea_uart_get_data(nmea_data_t *out)

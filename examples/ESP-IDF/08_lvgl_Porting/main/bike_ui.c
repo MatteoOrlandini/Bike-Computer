@@ -9,6 +9,10 @@ static lv_obj_t *label_avg;
 static lv_obj_t *label_total;
 static lv_obj_t *label_gradient;
 static lv_obj_t *label_ascent;
+static lv_obj_t *dot_ble;
+static lv_obj_t *dot_gps;
+static lv_obj_t *label_ble_status;
+static lv_obj_t *label_gps_status;
 
 /* ------------------------------------------------------------------ */
 /*  Reset button callback                                               */
@@ -27,36 +31,67 @@ static void reset_btn_cb(lv_event_t *e)
 
 static void bike_ui_timer_cb(lv_timer_t *timer)
 {
-    trip_data_t *data = (trip_data_t *)timer->user_data;
-    bike_ui_update(data);
+    ui_timer_data_t *d = (ui_timer_data_t *)timer->user_data;
+    bike_ui_update(d->trip, d->status);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Init                                                                */
 /* ------------------------------------------------------------------ */
 
-void bike_ui_init(trip_data_t *data)
+void bike_ui_init(trip_data_t *data, ui_status_t *status)
 {
+    static ui_timer_data_t s_timer_data;   /* static lifetime — safe for timer */
+    s_timer_data.trip   = data;
+    s_timer_data.status = status;
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+
+    // --- BLE status indicator (top-left) ---
+    dot_ble = lv_obj_create(scr);
+    lv_obj_set_size(dot_ble, 16, 16);
+    lv_obj_set_style_radius(dot_ble, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(dot_ble, 0, 0);
+    lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF0000), 0);
+    lv_obj_align(dot_ble, LV_ALIGN_TOP_LEFT, 20, 14);
+
+    label_ble_status = lv_label_create(scr);
+    lv_obj_set_style_text_font(label_ble_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label_ble_status, lv_color_hex(0xAAAAAA), 0);
+    lv_label_set_text(label_ble_status, "BLE OFF");
+    lv_obj_align(label_ble_status, LV_ALIGN_TOP_LEFT, 44, 14);
+
+    // --- GPS UART status indicator (top-left) ---
+    dot_gps = lv_obj_create(scr);
+    lv_obj_set_size(dot_gps, 16, 16);
+    lv_obj_set_style_radius(dot_gps, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(dot_gps, 0, 0);
+    lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF0000), 0);
+    lv_obj_align(dot_gps, LV_ALIGN_TOP_LEFT, 20, 34);
+
+    label_gps_status = lv_label_create(scr);
+    lv_obj_set_style_text_font(label_gps_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label_gps_status, lv_color_hex(0xAAAAAA), 0);
+    lv_label_set_text(label_gps_status, "GPS OFF");
+    lv_obj_align(label_gps_status, LV_ALIGN_TOP_LEFT, 44, 34);
 
     // --- Current speed (large, top center) ---
     lv_obj_t *lbl_spd_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_spd_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_spd_title, "km/h");
+    lv_label_set_text(lbl_spd_title, "Velocita' [km/h]");
     lv_obj_set_style_text_color(lbl_spd_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_spd_title, LV_ALIGN_TOP_MID, 0, 10);
 
     label_speed = lv_label_create(scr);
     lv_obj_set_style_text_font(label_speed, &lv_font_montserrat_36, 0);
-    lv_obj_set_style_text_color(label_speed, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_style_text_color(label_speed, lv_color_white(), 0);
     lv_label_set_text(label_speed, "--.-");
     lv_obj_align(label_speed, LV_ALIGN_TOP_MID, 0, 50);
 
     // --- Elapsed time ---
     lv_obj_t *lbl_time_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_time_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_time_title, "Time");
+    lv_label_set_text(lbl_time_title, "Tempo");
     lv_obj_set_style_text_color(lbl_time_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_time_title, LV_ALIGN_TOP_LEFT, 20, 140);
 
@@ -69,7 +104,7 @@ void bike_ui_init(trip_data_t *data)
     // --- Avg speed ---
     lv_obj_t *lbl_avg_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_avg_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_avg_title, "Avg km/h");
+    lv_label_set_text(lbl_avg_title, "Velocita' media [km/h]");
     lv_obj_set_style_text_color(lbl_avg_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_avg_title, LV_ALIGN_TOP_RIGHT, -20, 140);
 
@@ -82,7 +117,7 @@ void bike_ui_init(trip_data_t *data)
     // --- Total km ---
     lv_obj_t *lbl_total_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_total_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_total_title, "Total km");
+    lv_label_set_text(lbl_total_title, "Distanza [km]");
     lv_obj_set_style_text_color(lbl_total_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_total_title, LV_ALIGN_TOP_LEFT, 20, 260);
 
@@ -95,7 +130,7 @@ void bike_ui_init(trip_data_t *data)
     // --- Gradient ---
     lv_obj_t *lbl_grad_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_grad_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_grad_title, "Gradient %");
+    lv_label_set_text(lbl_grad_title, "Pendenza %");
     lv_obj_set_style_text_color(lbl_grad_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_grad_title, LV_ALIGN_TOP_MID, 0, 260);
 
@@ -108,7 +143,7 @@ void bike_ui_init(trip_data_t *data)
     // --- Ascent ---
     lv_obj_t *lbl_ascent_title = lv_label_create(scr);
     lv_obj_set_style_text_font(lbl_ascent_title, &lv_font_montserrat_36, 0);
-    lv_label_set_text(lbl_ascent_title, "Ascent m");
+    lv_label_set_text(lbl_ascent_title, "Ascesa [m]");
     lv_obj_set_style_text_color(lbl_ascent_title, lv_color_hex(0xAAAAAA), 0);
     lv_obj_align(lbl_ascent_title, LV_ALIGN_TOP_RIGHT, -20, 260);
 
@@ -130,16 +165,49 @@ void bike_ui_init(trip_data_t *data)
     lv_obj_center(btn_label);
 
     // Start the 1-second refresh timer
-    lv_timer_create(bike_ui_timer_cb, 1000, data);
+    lv_timer_create(bike_ui_timer_cb, 1000, &s_timer_data);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Update                                                              */
 /* ------------------------------------------------------------------ */
 
-void bike_ui_update(const trip_data_t *data)
+void bike_ui_update(const trip_data_t *data, const ui_status_t *status)
 {
     char buf[32];
+    
+    /* --- BLE indicator --- */
+    if (status) {
+        switch (status->ble) {
+            case BLE_STATUS_OFF:
+                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF0000), 0);
+                lv_label_set_text(label_ble_status, "BLE OFF");
+                break;
+            case BLE_STATUS_ON:
+                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF8800), 0);
+                lv_label_set_text(label_ble_status, "BLE ON");
+                break;
+            case BLE_STATUS_CONNECTED:
+                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0x00FF00), 0);
+                lv_label_set_text(label_ble_status, "BLE CONN");
+                break;
+        }
+
+        switch (status->gps_uart) {
+            case GPS_UART_STATUS_OFF:
+                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF0000), 0);
+                lv_label_set_text(label_gps_status, "GPS OFF");
+                break;
+            case GPS_UART_STATUS_INVALID:
+                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF8800), 0);
+                lv_label_set_text(label_gps_status, "GPS NO FIX");
+                break;
+            case GPS_UART_STATUS_VALID:
+                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0x00FF00), 0);
+                lv_label_set_text(label_gps_status, "GPS OK");
+                break;
+        }
+    }
 
     if (!data || !data->valid) {
         lv_label_set_text(label_speed,    "--.-");

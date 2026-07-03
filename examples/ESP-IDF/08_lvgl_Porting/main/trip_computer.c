@@ -22,11 +22,13 @@
 
 #define TAG "TRIP"
 
+#define FIX_TIMEOUT_US  2000000LL   /* 2 seconds in microseconds */
+
 /* ------------------------------------------------------------------ */
 /*  Tunable constants                                                   */
 /* ------------------------------------------------------------------ */
 
-#define MIN_SPEED_KMH        4.0f   /* ignore updates below this speed  */
+#define MIN_SPEED_KMH        3.0f   /* ignore updates below this speed  */
 #define MIN_ALT_CHANGE_M     2.0f   /* ignore altitude changes below this */
 #define GRADIENT_WINDOW      5      /* number of fixes to smooth gradient */
 #define EARTH_RADIUS_M       6371000.0  /* mean Earth radius, metres     */
@@ -61,6 +63,8 @@ typedef struct {
 
     /* Published output */
     trip_data_t       data;
+
+    int64_t  last_valid_fix_us; /* esp_timer tick of last valid fix, for gap detection */  // ADD THIS
 } trip_state_t;
 
 static trip_state_t      s_state;
@@ -143,23 +147,50 @@ void trip_computer_init(void)
 
 void trip_computer_update(const nmea_data_t *fix)
 {
-    if (!fix || !fix->valid) return;
+    if (!fix) return;
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
 
-    /* Always update current speed */
-    s_state.data.speed_kmh = fix->speed_kmh;
-    s_state.data.valid     = true;
-
-    /* Elapsed time */
     int64_t now_us = esp_timer_get_time();
+
+    /* --- Handle lost fix --- */
+    if (!fix->valid) {
+        /* Only act if we previously had a fix and the timeout has elapsed */
+        if (s_state.last_valid_fix_us > 0 &&
+            (now_us - s_state.last_valid_fix_us) > FIX_TIMEOUT_US) {
+            s_state.data.speed_kmh  = 0.0f;   /* don't freeze last speed */
+            s_state.data.gps_fix_lost = true;
+            s_state.has_prev = false;          /* force reference reset on next valid fix */
+        }
+        xSemaphoreGive(s_mutex);
+        return;
+    }
+
+    /* --- Valid fix from here --- */
+
+    /* Detect gap since last valid fix — reset reference point silently */
+    if (s_state.last_valid_fix_us > 0 &&
+        (now_us - s_state.last_valid_fix_us) > FIX_TIMEOUT_US) {
+        ESP_LOGW(TAG, "GPS gap >2s, resetting reference point");
+        s_state.has_prev  = false;
+        /* Clear stale gradient samples — they span the gap */
+        memset(s_state.grad_buf, 0, sizeof(s_state.grad_buf));
+        s_state.grad_head  = 0;
+        s_state.grad_count = 0;
+    }
+
+    s_state.last_valid_fix_us   = now_us;
+    s_state.data.gps_fix_lost   = false;
+    s_state.data.speed_kmh      = fix->speed_kmh;
+    s_state.data.valid          = true;
+
+    /* Elapsed time — only ticks while we have a valid fix */
     s_state.data.elapsed_sec =
         (uint32_t)((now_us - s_state.start_us) / 1000000LL);
 
     /* Skip movement calculations below minimum speed */
     if (fix->speed_kmh < MIN_SPEED_KMH) {
-        s_state.has_prev = false;   /* reset continuity so next valid fix
-                                       starts a fresh segment             */
+        s_state.has_prev = false;
         xSemaphoreGive(s_mutex);
         return;
     }

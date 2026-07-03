@@ -21,6 +21,10 @@ typedef struct {
     float    ascent_m;        /* cumulative positive altitude gain      */
     uint32_t elapsed_sec;     /* elapsed time since reset (wall clock)  */
     bool     valid;           /* true once at least one fix processed   */
+    bool     gps_fix_lost;    /* true when fix has been absent > 2 s   */  // ADD THIS
+    uint8_t  ble_status;     // 0=off, 1=on/advertising, 2=connected
+    uint8_t  gps_uart_status; // 0=no data, 1=data but not valid, 2=valid <2s ago
+
 } trip_data_t;
 
 /**

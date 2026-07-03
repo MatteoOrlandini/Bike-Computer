@@ -58,6 +58,9 @@ static const ble_uuid128_t gps_chr_uuid =
 static nmea_data_t       s_nmea_data;
 static SemaphoreHandle_t s_mutex;
 static bool              s_connected = false;
+static bool s_ble_running = false;   /* true while nimble_port is active */
+static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+
 
 /* ------------------------------------------------------------------ */
 /*  GATT characteristic access callback                                 */
@@ -148,6 +151,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
             extern void ble_gps_start_advertising(void);
             ble_gps_start_advertising();
         }
+        s_conn_handle = event->connect.conn_handle;
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
@@ -157,6 +161,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
         /* restart advertising so the phone can reconnect */
         extern void ble_gps_start_advertising(void);
         ble_gps_start_advertising();
+        s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         break;
 
     default:
@@ -258,7 +263,7 @@ void ble_gps_init(void)
     ble_att_set_preferred_mtu(185);  /* enough for the longest NMEA sentence */
 
     nimble_port_freertos_init(nimble_host_task);
-
+    s_ble_running = true;          // ADD this line
     ESP_LOGI(TAG, "BLE GPS service initialised");
 }
 
@@ -274,4 +279,57 @@ bool ble_gps_get_data(nmea_data_t *out)
 bool ble_gps_is_connected(void)
 {
     return s_connected;
+}
+
+void ble_gps_enable(void)
+{
+    if (s_ble_running) return;
+
+    ESP_LOGI(TAG, "BLE enabling");
+
+    ESP_ERROR_CHECK(nimble_port_init());
+
+    ble_hs_cfg.sync_cb  = on_sync;
+    ble_hs_cfg.reset_cb = on_reset;
+
+    /* Re-register GATT services — required after a port deinit/reinit */
+    int rc = ble_gatts_count_cfg(s_gatt_svcs);
+    assert(rc == 0);
+    rc = ble_gatts_add_svcs(s_gatt_svcs);
+    assert(rc == 0);
+
+    ble_svc_gap_init();
+    ble_svc_gatt_init();
+    ble_svc_gap_device_name_set("BikeGPS");
+    ble_att_set_preferred_mtu(185);
+
+    nimble_port_freertos_init(nimble_host_task);
+    s_ble_running = true;
+    s_connected   = false;
+}
+
+void ble_gps_disable(void)
+{
+    if (!s_ble_running) return;
+
+    ESP_LOGI(TAG, "BLE disabling — UART GPS active");
+
+    /* Gracefully stop advertising and drop any active connection */
+    if (ble_gap_adv_active()) {
+        ble_gap_adv_stop();
+    }
+    
+    if (s_connected) {
+        ble_gap_terminate(s_conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+    }
+
+    nimble_port_deinit();
+    s_ble_running = false;
+    s_connected   = false;
+}
+
+
+bool ble_gps_is_running(void) 
+{ 
+    return s_ble_running; 
 }

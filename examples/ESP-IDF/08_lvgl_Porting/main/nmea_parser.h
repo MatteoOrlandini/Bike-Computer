@@ -36,6 +36,9 @@ typedef struct {
     bool    valid;
 } nmea_data_t;
 
+
+
+
 /**
  * Parse a single NMEA 0183 sentence into *data.
  *
@@ -53,6 +56,7 @@ typedef struct {
  *                        a bad checksum (data is unchanged).
  */
 bool nmea_parse_sentence(const char *sentence, nmea_data_t *data);
+
 
 #ifdef __cplusplus
 }

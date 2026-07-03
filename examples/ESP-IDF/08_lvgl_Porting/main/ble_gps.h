@@ -26,6 +26,21 @@ bool ble_gps_get_data(nmea_data_t *out);
  */
 bool ble_gps_is_connected(void);
  
+/**
+ * Power the NimBLE stack on. Safe to call after ble_gps_init().
+ * Restarts advertising. No-op if already running.
+ */
+void ble_gps_enable(void);
+
+/**
+ * Power the NimBLE stack off. Disconnects any client, stops advertising,
+ * and deinits the port to save power.
+ */
+void ble_gps_disable(void);
+
+
+bool ble_gps_is_running(void);
+
 #ifdef __cplusplus
 }
 #endif
