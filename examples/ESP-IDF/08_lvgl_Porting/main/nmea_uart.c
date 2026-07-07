@@ -190,6 +190,7 @@ static const uint8_t UBX_CFG_GNSS_GPS_GLONASS_GALILEO[] = {
     0x0E, 0xB8              // checksum (CK_A, CK_B)
 };
 
+/*
 // UBX-MON-VER poll request: nessun payload, chiede al modulo di rispondere
 // con la sua versione firmware/hardware
 static const uint8_t UBX_POLL_MON_VER[] = {
@@ -197,6 +198,61 @@ static const uint8_t UBX_POLL_MON_VER[] = {
     0x0A, 0x04,   // class = MON, id = VER
     0x00, 0x00,   // length = 0 (nessun payload nel poll request)
     0x0E, 0x34    // checksum (CK_A, CK_B)
+};
+*/
+
+// UBX-CFG-MSG: abilita GGA su UART1 (rate = 1, una volta per soluzione nav)
+static const uint8_t UBX_CFG_MSG_GGA_ON[] = {
+    0xB5, 0x62,             // sync char 1, 2
+    0x06, 0x01,             // class = CFG, id = MSG
+    0x08, 0x00,             // length = 8
+
+    0xF0, 0x00,             // msgClass=0xF0 (NMEA), msgID=0x00 -> GGA
+    0x00,                   // rate su I2C/DDC = 0
+    0x01,                   // rate su UART1 = 1 (abilitata)
+    0x00, 0x00, 0x00, 0x00, // rate su UART2, USB, SPI, reserved = 0
+
+    0x00, 0x28              // checksum
+};
+
+// UBX-CFG-MSG: abilita RMC su UART1 (rate = 1)
+static const uint8_t UBX_CFG_MSG_RMC_ON[] = {
+    0xB5, 0x62, 0x06, 0x01, 0x08, 0x00,
+    0xF0, 0x04,             // msgID=0x04 -> RMC
+    0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x44              // checksum
+};
+
+// UBX-CFG-MSG: disabilita GLL (rate = 0 su tutte le porte)
+static const uint8_t UBX_CFG_MSG_GLL_OFF[] = {
+    0xB5, 0x62, 0x06, 0x01, 0x08, 0x00,
+    0xF0, 0x01,             // msgID=0x01 -> GLL
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x2A
+};
+
+// UBX-CFG-MSG: disabilita GSA (rate = 0)
+static const uint8_t UBX_CFG_MSG_GSA_OFF[] = {
+    0xB5, 0x62, 0x06, 0x01, 0x08, 0x00,
+    0xF0, 0x02,             // msgID=0x02 -> GSA
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x31
+};
+
+// UBX-CFG-MSG: disabilita GSV (rate = 0)
+static const uint8_t UBX_CFG_MSG_GSV_OFF[] = {
+    0xB5, 0x62, 0x06, 0x01, 0x08, 0x00,
+    0xF0, 0x03,             // msgID=0x03 -> GSV
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x38
+};
+
+// UBX-CFG-MSG: disabilita VTG (rate = 0)
+static const uint8_t UBX_CFG_MSG_TVG_OFF[] = {
+    0xB5, 0x62, 0x06, 0x01, 0x08, 0x00,
+    0xF0, 0x05,             // msgID=0x05 -> VTG
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x46
 };
 
 /* ------------------------------------------------------------------ */
@@ -335,12 +391,48 @@ void nmea_uart_init(void)
     vTaskDelay(pdMS_TO_TICKS(500));
 
     // 4. Inject Pedestrian profile, 5Hz execution configurations and use GPS, GLONASS and GALILEO
-    ESP_LOGI(TAG, "Injecting Pedestrian Profile, 5Hz update rate configurations and use GPS, GLONASS and GALILEO...");
+    ESP_LOGI(TAG, "Injecting Pedestrian Profile...");
     send_ubx_cmd(UBX_NAV5_PEDESTRIAN, sizeof(UBX_NAV5_PEDESTRIAN));
     vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 5. Set 5Hz execution configurations 
+    ESP_LOGI(TAG, "Settings 5Hz update rate configurations and use GPS, GLONASS and GALILEO...");
     send_ubx_cmd(UBX_RATE_5HZ, sizeof(UBX_RATE_5HZ));
     vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 6. Using GPS, GLONASS and GALILEO
+    ESP_LOGI(TAG, "Using GPS, GLONASS and GALILEO...");
     send_ubx_cmd(UBX_CFG_GNSS_GPS_GLONASS_GALILEO, sizeof(UBX_CFG_GNSS_GPS_GLONASS_GALILEO));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 7. Enable GGA string
+    ESP_LOGI(TAG, "Enable GGA string...");
+    send_ubx_cmd(UBX_CFG_MSG_GGA_ON, sizeof(UBX_CFG_MSG_GGA_ON));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 8. Enable RMC string
+    ESP_LOGI(TAG, "Enable RMC string...");
+    send_ubx_cmd(UBX_CFG_MSG_RMC_ON, sizeof(UBX_CFG_MSG_RMC_ON));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 9. Disable GLL string
+    ESP_LOGI(TAG, "Disable GLL string...");
+    send_ubx_cmd(UBX_CFG_MSG_GLL_OFF, sizeof(UBX_CFG_MSG_GLL_OFF));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 10. Disable GSA string
+    ESP_LOGI(TAG, "Disable GSA string...");
+    send_ubx_cmd(UBX_CFG_MSG_GSA_OFF, sizeof(UBX_CFG_MSG_GSA_OFF));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 11. Disable GSV string
+    ESP_LOGI(TAG, "Disable GSV string...");
+    send_ubx_cmd(UBX_CFG_MSG_GSV_OFF, sizeof(UBX_CFG_MSG_GSV_OFF));
+    vTaskDelay(pdMS_TO_TICKS(150));
+
+    // 12. Disable TVG string
+    ESP_LOGI(TAG, "Disable GSV string...");
+    send_ubx_cmd(UBX_CFG_MSG_TVG_OFF, sizeof(UBX_CFG_MSG_TVG_OFF));
     vTaskDelay(pdMS_TO_TICKS(150));
 
     ESP_LOGI(TAG, "U-blox configuration successful. Starting GPS Task loop...");
