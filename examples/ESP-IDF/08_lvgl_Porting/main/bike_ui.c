@@ -1,6 +1,7 @@
 #include "bike_ui.h"
 #include "trip_computer.h"
 #include "lvgl.h"
+#include "waveshare_rgb_lcd_port.h"
 #include <stdio.h>
 
 static lv_obj_t *label_speed;
@@ -22,6 +23,13 @@ static void reset_btn_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         trip_computer_reset();
+    }
+}
+
+static void power_off_btn_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        wavesahre_rgb_lcd_bl_off();
     }
 }
 
@@ -154,15 +162,26 @@ void bike_ui_init(trip_data_t *data, ui_status_t *status)
     lv_obj_align(label_ascent, LV_ALIGN_TOP_RIGHT, -20, 300);
 
     // --- Reset button (bottom center) ---
-    lv_obj_t *btn = lv_btn_create(scr);
-    lv_obj_set_size(btn, 160, 60);
-    lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_obj_add_event_cb(btn, reset_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *btn_reset = lv_btn_create(scr);
+    lv_obj_set_size(btn_reset, 160, 60);
+    lv_obj_align(btn_reset, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_add_event_cb(btn_reset, reset_btn_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *btn_label = lv_label_create(btn);
+    lv_obj_t *btn_label = lv_label_create(btn_reset);
     lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_36, 0);
     lv_label_set_text(btn_label, "Reset");
     lv_obj_center(btn_label);
+
+    // --- Power off button (bottom right) ---
+    lv_obj_t *btn_power_off = lv_btn_create(scr);
+    lv_obj_set_size(btn_power_off, 160, 60);
+    lv_obj_align(btn_power_off, LV_ALIGN_BOTTOM_RIGHT, 0, -10);
+    lv_obj_add_event_cb(btn_power_off, power_off_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *btn_power_off_label = lv_label_create(btn_power_off);
+    lv_obj_set_style_text_font(btn_power_off_label, &lv_font_montserrat_32, 0);
+    lv_label_set_text(btn_power_off_label, "Stand by");
+    lv_obj_center(btn_power_off_label);
 
     // Start the 1-second refresh timer
     lv_timer_create(bike_ui_timer_cb, 1000, &s_timer_data);
