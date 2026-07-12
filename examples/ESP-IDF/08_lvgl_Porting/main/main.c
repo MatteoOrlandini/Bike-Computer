@@ -97,6 +97,9 @@ static void gps_task(void *arg)
 void app_main(void)
 {
     ble_gps_init();
+    #ifdef TEST_GPS_BAUD_RATE
+    baudrate_autoscan_run();
+    #endif
     nmea_uart_init();
     trip_computer_init();
 

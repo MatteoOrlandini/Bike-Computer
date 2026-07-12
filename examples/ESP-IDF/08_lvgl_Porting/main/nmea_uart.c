@@ -13,7 +13,17 @@
  *
  * Thread-safe: a single mutex protects the shared nmea_data_t.
  */
+#ifdef TEST_GPS_BAUD_RATE
+// === TEMPORARY BAUDRATE AUTO-SCAN ===
+// Da chiamare UNA VOLTA in app_main(), PRIMA di nmea_uart_init()
+// e PRIMA di ublox_configure_for_cycling().
+// Rimuovere una volta trovato il baudrate corretto.
 
+#include "driver/uart.h"
+#include "esp_log.h"
+#include <ctype.h>
+#include "esp_timer.h"
+#endif
 #include "nmea_uart.h"
 #include "nmea_parser.h"
 
@@ -45,7 +55,6 @@
 #define NMEA_TASK_STACK_SIZE    (4096)  // Task stack size 
 
 // u-blox UBX binary commands
-// 1. Set Navigation Mode to Pedestrian (NAV5)
 static const uint8_t UBX_NAV5_PEDESTRIAN[] = {
     0xB5, 0x62,             // sync char 1, 2
     0x06, 0x24,             // class = CFG, id = NAV5
@@ -81,29 +90,6 @@ static const uint8_t UBX_RATE_5HZ[] = {
     0x01, 0x00,   // timeRef = 1 (GPS time)
     0xDE, 0x6A    // checksum
 };
-
-// 3. Set Baud Rate to 115200 (PRT)
-static const uint8_t UBX_PRT_115200[] = {
-    0xB5, 0x62,             // sync char 1, 2
-    0x06, 0x00,             // class = CFG, id = PRT
-    0x14, 0x00,             // length = 20 (little endian)
-
-    0x01,                   // portID = 1 (UART1, unica UART fisica del NEO-8M)
-    0x00,                   // reserved0
-    0x00, 0x00,             // txReady = 0 (disabilitato)
-
-    0xD0, 0x08, 0x00, 0x00, // mode = 0x000008D0 -> 8 data bit, no parity, 1 stop bit
-
-    0x00, 0xC2, 0x01, 0x00, // baudRate = 115200 (little endian, 0x0001C200)
-
-    0x07, 0x00,             // inProtoMask  = 0x0007 -> UBX + NMEA + RTCM in ingresso
-    0x03, 0x00,             // outProtoMask = 0x0003 -> UBX + NMEA in uscita
-    0x00, 0x00,             // flags (extended TX timeout ecc.) = 0
-    0x00, 0x00,             // reserved2
-
-    0xC0, 0x7E              // checksum (CK_A, CK_B)
-};
-
 
 // UBX-CFG-GNSS: GPS + SBAS + Galileo + QZSS + GLONASS attivi, BeiDou + IMES disattivati
 // (per rispettare il budget canali del chip M8 e garantire GPS+GLONASS+Galileo concorrenti stabili)
@@ -267,8 +253,101 @@ static char nmea_string[NMEA_BUF_SIZE];
 /* ------------------------------------------------------------------ */
 /*  Generic reader task — one instance per UART                        */
 /* ------------------------------------------------------------------ */
+#ifdef TEST_GPS_BAUD_RATE
+// === TEMPORARY BAUDRATE AUTO-SCAN ===
+// Da chiamare UNA VOLTA in app_main(), PRIMA di nmea_uart_init()
+// e PRIMA di ublox_configure_for_cycling().
+// Rimuovere una volta trovato il baudrate corretto.
+
+static const char *SCAN_TAG = "BAUD_SCAN";
+
+// Adatta questi valori alla UART/pin del tuo NEO-8M/M10 (UART2, GPIO15/16)
+#define SCAN_UART_PORT      UART_NUM_2
+#define SCAN_UART_TX_PIN    16
+#define SCAN_UART_RX_PIN    15
+#define SCAN_BUF_SIZE       512
+#define SCAN_WINDOW_MS      400   // finestra di ascolto per ogni baudrate (> periodo 200-300ms osservato)
+
+static bool scan_try_baud(int baud)
+{
+
+    const uart_config_t cfg = {
+        .baud_rate  = baud,  // Set baud rate 
+        .data_bits  = UART_DATA_8_BITS,     // 8 data bits 
+        .parity     = UART_PARITY_DISABLE,  // No parity bit 
+        .stop_bits  = UART_STOP_BITS_1,      // 1 stop bit 
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE, // Disable hardware flow control 
+        .source_clk = UART_SCLK_DEFAULT,   // Default clock source 
+    };
 
 
+    ESP_ERROR_CHECK(uart_driver_install(NMEA_UART_PORT_NUM, NMEA_BUF_SIZE, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(NMEA_UART_PORT_NUM, &cfg));
+    ESP_ERROR_CHECK(uart_set_pin(NMEA_UART_PORT_NUM, NMEA_TXD_PIN, NMEA_RXD_PIN, NMEA_TEST_RTS, NMEA_TEST_CTS));  
+
+    uint8_t buf[SCAN_BUF_SIZE];
+    int total = 0;
+    int64_t start = esp_timer_get_time();
+
+    while ((esp_timer_get_time() - start) < (SCAN_WINDOW_MS * 1000)) {
+        int len = uart_read_bytes(SCAN_UART_PORT, buf + total,
+                                   SCAN_BUF_SIZE - total - 1, pdMS_TO_TICKS(50));
+        if (len > 0) {
+            total += len;
+            if (total >= SCAN_BUF_SIZE - 1) break;
+        }
+    }
+
+    ESP_LOGI(SCAN_TAG, "Baud %d: ricevuti %d byte", baud, total);
+
+    bool found_nmea = false;
+    bool found_ubx = false;
+
+    for (int i = 0; i < total; i++) {
+        if (buf[i] == '$' && !found_nmea) {
+            // controlla che seguano caratteri ASCII stampabili plausibili (talker id)
+            if (i + 5 < total &&
+                isalpha((int)buf[i+1]) && isalpha((int)buf[i+2]) &&
+                isalpha((int)buf[i+3]) && isalpha((int)buf[i+4]) &&
+                isalpha((int)buf[i+5])) {
+                found_nmea = true;
+                ESP_LOGI(SCAN_TAG, "  -> possibile NMEA a offset %d: %.10s", i, &buf[i]);
+            }
+        }
+        if (i + 1 < total && buf[i] == 0xB5 && buf[i+1] == 0x62 && !found_ubx) {
+            found_ubx = true;
+            ESP_LOGI(SCAN_TAG, "  -> possibile UBX sync a offset %d", i);
+        }
+    }
+
+    uart_driver_delete(SCAN_UART_PORT);
+
+    if (found_nmea || found_ubx) {
+        ESP_LOGW(SCAN_TAG, "*** BAUD %d SEMBRA VALIDO (NMEA=%d UBX=%d) ***",
+                 baud, found_nmea, found_ubx);
+        return true;
+    }
+    return false;
+}
+
+void baudrate_autoscan_run(void)
+{
+    const int candidates[] = { 9600, 19200, 38400, 57600, 115200, 230400 };
+    const int n = sizeof(candidates) / sizeof(candidates[0]);
+
+    ESP_LOGW(SCAN_TAG, "=== INIZIO AUTO-SCAN BAUDRATE (UART2, GPIO15/16) ===");
+
+    for (int i = 0; i < n; i++) {
+        if (scan_try_baud(candidates[i])) {
+            ESP_LOGW(SCAN_TAG, "=== TROVATO: %d baud === (fermare lo scan, usare questo valore)", candidates[i]);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    ESP_LOGE(SCAN_TAG, "=== NESSUN BAUDRATE VALIDO TROVATO tra i candidati testati ===");
+}
+#endif
 
 /**
  * Parse a received byte from serial port to retrieve an NMEA 0183 
@@ -366,7 +445,7 @@ void nmea_uart_init(void)
     memset(&s_nmea_data, 0, sizeof(s_nmea_data));
 
     const uart_config_t uart_cfg = {
-        .baud_rate  = NMEA_UART_BAUD_RATE_9600,  // Set baud rate 
+        .baud_rate  = NMEA_UART_BAUD_RATE_115200,  // Set baud rate 
         .data_bits  = UART_DATA_8_BITS,     // 8 data bits 
         .parity     = UART_PARITY_DISABLE,  // No parity bit 
         .stop_bits  = UART_STOP_BITS_1,      // 1 stop bit 
@@ -380,7 +459,7 @@ void nmea_uart_init(void)
     ESP_ERROR_CHECK(uart_set_pin(NMEA_UART_PORT_NUM, NMEA_TXD_PIN, NMEA_RXD_PIN, NMEA_TEST_RTS, NMEA_TEST_CTS));   
 
     vTaskDelay(pdMS_TO_TICKS(500));
-
+#if 0
     // 2. Command the GPS module to shift internal speed to 115200 baud
     ESP_LOGI(TAG, "Upgrading GPS hardware baudrate to 115200...");
     send_ubx_cmd(UBX_PRT_115200, sizeof(UBX_PRT_115200));
@@ -389,8 +468,8 @@ void nmea_uart_init(void)
     // 3. Update ESP32-S3 UART hardware to match the new speed (115200)
     ESP_ERROR_CHECK(uart_set_baudrate(NMEA_UART_PORT_NUM, 115200));
     vTaskDelay(pdMS_TO_TICKS(500));
-
-    // 4. Inject Pedestrian profile, 5Hz execution configurations and use GPS, GLONASS and GALILEO
+#endif
+    // 4. Inject Pedestrian profile
     ESP_LOGI(TAG, "Injecting Pedestrian Profile...");
     send_ubx_cmd(UBX_NAV5_PEDESTRIAN, sizeof(UBX_NAV5_PEDESTRIAN));
     vTaskDelay(pdMS_TO_TICKS(150));
@@ -436,7 +515,7 @@ void nmea_uart_init(void)
     vTaskDelay(pdMS_TO_TICKS(150));
 
     ESP_LOGI(TAG, "U-blox configuration successful. Starting GPS Task loop...");
-
+    
     xTaskCreate(uart_reader_task, "NMEA UART Reader Task", NMEA_TASK_STACK_SIZE,
                 NULL, NMEA_TASK_PRIO, NULL);
 

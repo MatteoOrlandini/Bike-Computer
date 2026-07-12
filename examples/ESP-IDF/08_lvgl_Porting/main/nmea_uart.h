@@ -21,6 +21,9 @@ void nmea_uart_init(void);
  * Thread-safe. Returns true if at least one valid fix has been received.
  */
 bool nmea_uart_get_data(nmea_data_t *out);
+#ifdef TEST_GPS_BAUD_RATE
+void baudrate_autoscan_run(void);
+#endif
 
 #ifdef __cplusplus
 }

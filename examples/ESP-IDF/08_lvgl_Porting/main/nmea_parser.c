@@ -6,6 +6,7 @@
  */
 
 #include "nmea_parser.h"
+#include "esp_log.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -127,8 +128,13 @@ static bool parse_gprmc(const char *fields[], int count, nmea_data_t *data)
 
     /* Status must be 'A' (active) for a valid fix */
     if (fields[2][0] != 'A') {
+        ESP_LOGD("parse_gprmc RX", "Invalid data");
         data->valid = false;
         return false;
+    }
+    else
+    {
+        ESP_LOGD("parse_gprmc RX", "valid data");
     }
 
     /* Time */
@@ -176,7 +182,15 @@ static bool parse_gpgga(const char *fields[], int count, nmea_data_t *data)
     if (count < 10) return false;
 
     /* Fix quality 0 means no fix */
-    if (fields[6][0] == '0' || fields[6][0] == '\0') return false;
+    if (fields[6][0] == '0' || fields[6][0] == '\0')
+    {
+        ESP_LOGD("parse_gpgga RX", "Invalid data");
+        return false;
+    } 
+    else
+    {        
+        ESP_LOGD("parse_gpgga RX", "valid data");
+    }
 
     /* Altitude */
     data->altitude_m = (float)atof(fields[9]);
@@ -202,7 +216,11 @@ bool nmea_parse_sentence(const char *sentence, nmea_data_t *data)
     if (!sentence || !data) return false;
     if (sentence[0] != '$')  return false;
 
-    if (!verify_checksum(sentence)) return false;
+    if (!verify_checksum(sentence)) 
+    {
+        ESP_LOGD("nmea_parse_sentence", "Wrong checksum: %s", sentence);
+        return false;
+    }
 
     char buf[128];
     const char *fields[MAX_FIELDS];
@@ -215,8 +233,20 @@ bool nmea_parse_sentence(const char *sentence, nmea_data_t *data)
     if (strlen(type) < 5)               return false;
     const char *name = type + 2;        /* skip 'GP' / 'GN' / 'GL' etc. */
 
-    if (strcmp(name, "RMC") == 0) return parse_gprmc(fields, count, data);
-    if (strcmp(name, "GGA") == 0) return parse_gpgga(fields, count, data);
+    if (strcmp(name, "RMC") == 0) 
+    {
+        ESP_LOGD("nmea_parse_sentence", "RMC sentence: %s", sentence);
+        return parse_gprmc(fields, count, data);
+    }
+    else if (strcmp(name, "GGA") == 0) 
+    {
+        ESP_LOGD("nmea_parse_sentence", "GGA sentence: %s", sentence);
+        return parse_gpgga(fields, count, data);
+    }
+    else
+    {
+        ESP_LOGD("nmea_parse_sentence", "Other sentence: %s", sentence);
+    }
 
     return false;   /* unrecognised sentence type */
 }
