@@ -1,12 +1,14 @@
 /*
  * nmea_parser.c
  *
- * Parses $GPRMC and $GPGGA NMEA 0183 sentences into nmea_data_t.
+ * Parses $GPRMC and $GPGGA NMEA 0183 sentences.
  * No dynamic allocation. No external dependencies beyond the C standard library.
  */
 
 #include "nmea_parser.h"
+#include "nmea_data.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -122,14 +124,29 @@ static double nmea_coord_to_degrees(const char *coord, char hemisphere)
  * [10]   Magnetic variation
  * [11]   E/W
  */
-static bool parse_gprmc(const char *fields[], int count, nmea_data_t *data)
+static bool parse_gprmc(const char *fields[], int count, nmea_source_t source)
 {
+    int64_t now = esp_timer_get_time();
     if (count < 8) return false;
+
+    /* Time */
+    const char *t = fields[1];
+    if (strlen(t) >= 6) {
+        char s_hour[3] = {0};
+        char s_minute[3] = {0};
+        char s_second[3] = {0};
+        s_hour[0] = t[0]; 
+        s_hour[1] = t[1];
+        s_minute[0] = t[2]; 
+        s_minute[1] = t[3];
+        s_second[0] = t[4];
+        s_second[1] = t[5];
+        nmea_data_set_time((uint8_t)atoi(s_hour), (uint8_t)atoi(s_minute), (uint8_t)atoi(s_second), source, now);
+    }
 
     /* Status must be 'A' (active) for a valid fix */
     if (fields[2][0] != 'A') {
         ESP_LOGD("parse_gprmc RX", "Invalid data");
-        data->valid = false;
         return false;
     }
     else
@@ -137,26 +154,13 @@ static bool parse_gprmc(const char *fields[], int count, nmea_data_t *data)
         ESP_LOGD("parse_gprmc RX", "valid data");
     }
 
-    /* Time */
-    const char *t = fields[1];
-    if (strlen(t) >= 6) {
-        char tmp[3] = {0};
-        tmp[0] = t[0]; tmp[1] = t[1];
-        data->hour   = (uint8_t)atoi(tmp);
-        tmp[0] = t[2]; tmp[1] = t[3];
-        data->minute = (uint8_t)atoi(tmp);
-        tmp[0] = t[4]; tmp[1] = t[5];
-        data->second = (uint8_t)atoi(tmp);
-    }
-
     /* Position */
-    data->latitude  = nmea_coord_to_degrees(fields[3], fields[4][0]);
-    data->longitude = nmea_coord_to_degrees(fields[5], fields[6][0]);
+    nmea_data_set_latitude( nmea_coord_to_degrees(fields[3], fields[4][0]), source, now);
+    nmea_data_set_longitude( nmea_coord_to_degrees(fields[5], fields[6][0]), source, now);
 
     /* Speed: knots → km/h (1 knot = 1.852 km/h) */
-    data->speed_kmh = (float)(atof(fields[7]) * 1.852);
+    nmea_data_set_speed(((float)(atof(fields[7])) * 1.852), source, now);
 
-    data->valid = true;
     return true;
 }
 
@@ -177,8 +181,10 @@ static bool parse_gprmc(const char *fields[], int count, nmea_data_t *data)
  *  [9]   Altitude (above mean sea level)
  * [10]   M (metres)
  */
-static bool parse_gpgga(const char *fields[], int count, nmea_data_t *data)
+static bool parse_gpgga(const char *fields[], int count, nmea_source_t source)
 {
+    int64_t now = esp_timer_get_time();
+
     if (count < 10) return false;
 
     /* Fix quality 0 means no fix */
@@ -193,15 +199,15 @@ static bool parse_gpgga(const char *fields[], int count, nmea_data_t *data)
     }
 
     /* Altitude */
-    data->altitude_m = (float)atof(fields[9]);
+    nmea_data_set_altitude((float)atof(fields[9]), source, now);
 
     /* Satellites */
-    data->satellites = (uint8_t)atoi(fields[7]);
+    nmea_data_set_satellites((uint8_t)atoi(fields[7]), source, now);
 
     /* Position (also present in GGA, update for consistency) */
     if (fields[2][0] != '\0' && fields[4][0] != '\0') {
-        data->latitude  = nmea_coord_to_degrees(fields[2], fields[3][0]);
-        data->longitude = nmea_coord_to_degrees(fields[4], fields[5][0]);
+        nmea_data_set_latitude(nmea_coord_to_degrees(fields[2], fields[3][0]), source, now);
+        nmea_data_set_longitude(nmea_coord_to_degrees(fields[4], fields[5][0]), source, now);
     }
 
     return true;
@@ -211,9 +217,9 @@ static bool parse_gpgga(const char *fields[], int count, nmea_data_t *data)
 /*  Public API                                                          */
 /* ------------------------------------------------------------------ */
 
-bool nmea_parse_sentence(const char *sentence, nmea_data_t *data)
+bool nmea_parse_sentence(const char *sentence, nmea_source_t source)
 {
-    if (!sentence || !data) return false;
+    if (!sentence) return false;
     if (sentence[0] != '$')  return false;
 
     if (!verify_checksum(sentence)) 
@@ -235,17 +241,17 @@ bool nmea_parse_sentence(const char *sentence, nmea_data_t *data)
 
     if (strcmp(name, "RMC") == 0) 
     {
-        ESP_LOGD("nmea_parse_sentence", "RMC sentence: %s", sentence);
-        return parse_gprmc(fields, count, data);
+        ESP_LOGI("nmea_parse_sentence", "RMC sentence: %s", sentence);
+        return parse_gprmc(fields, count, source);
     }
     else if (strcmp(name, "GGA") == 0) 
     {
-        ESP_LOGD("nmea_parse_sentence", "GGA sentence: %s", sentence);
-        return parse_gpgga(fields, count, data);
+        ESP_LOGI("nmea_parse_sentence", "GGA sentence: %s", sentence);
+        return parse_gpgga(fields, count, source);
     }
     else
     {
-        ESP_LOGD("nmea_parse_sentence", "Other sentence: %s", sentence);
+        ESP_LOGI("nmea_parse_sentence", "Other sentence: %s", sentence);
     }
 
     return false;   /* unrecognised sentence type */

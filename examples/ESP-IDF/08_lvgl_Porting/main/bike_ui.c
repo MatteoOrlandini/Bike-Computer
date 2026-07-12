@@ -34,24 +34,11 @@ static void power_off_btn_cb(lv_event_t *e)
 }
 
 /* ------------------------------------------------------------------ */
-/*  LVGL timer — fires every second on the LVGL task                   */
-/* ------------------------------------------------------------------ */
-
-static void bike_ui_timer_cb(lv_timer_t *timer)
-{
-    ui_timer_data_t *d = (ui_timer_data_t *)timer->user_data;
-    bike_ui_update(d->trip, d->status);
-}
-
-/* ------------------------------------------------------------------ */
 /*  Init                                                                */
 /* ------------------------------------------------------------------ */
 
-void bike_ui_init(trip_data_t *data, ui_status_t *status)
+void bike_ui_init(void)
 {
-    static ui_timer_data_t s_timer_data;   /* static lifetime — safe for timer */
-    s_timer_data.trip   = data;
-    s_timer_data.status = status;
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
 
@@ -182,68 +169,60 @@ void bike_ui_init(trip_data_t *data, ui_status_t *status)
     lv_obj_set_style_text_font(btn_power_off_label, &lv_font_montserrat_32, 0);
     lv_label_set_text(btn_power_off_label, "Stand by");
     lv_obj_center(btn_power_off_label);
-
-    // Start the 1-second refresh timer
-    lv_timer_create(bike_ui_timer_cb, 1000, &s_timer_data);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Update                                                              */
 /* ------------------------------------------------------------------ */
 
-void bike_ui_update(const trip_data_t *data, const ui_status_t *status)
+void bike_ui_update(const trip_data_t data)
 {
     char buf[32];
     
     /* --- BLE indicator --- */
-    if (status) {
-        switch (status->ble) {
-            case BLE_STATUS_OFF:
-                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF0000), 0);
-                lv_label_set_text(label_ble_status, "BLE OFF");
-                break;
-            case BLE_STATUS_ON:
-                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF8800), 0);
-                lv_label_set_text(label_ble_status, "BLE ON");
-                break;
-            case BLE_STATUS_CONNECTED:
-                lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0x00FF00), 0);
-                lv_label_set_text(label_ble_status, "BLE CONN");
-                break;
-        }
-
-        switch (status->gps_uart) {
-            case GPS_UART_STATUS_OFF:
-                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF0000), 0);
-                lv_label_set_text(label_gps_status, "GPS OFF");
-                break;
-            case GPS_UART_STATUS_INVALID:
-                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF8800), 0);
-                lv_label_set_text(label_gps_status, "GPS NO FIX");
-                break;
-            case GPS_UART_STATUS_VALID:
-                lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0x00FF00), 0);
-                lv_label_set_text(label_gps_status, "GPS OK");
-                break;
-        }
+    switch (data.gps_status.gps_ble) {
+        case BLE_STATUS_OFF:
+            lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF0000), 0);
+            lv_label_set_text(label_ble_status, "BLE OFF");
+            break;
+        case BLE_STATUS_ON:
+            lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0xFF8800), 0);
+            lv_label_set_text(label_ble_status, "BLE ON");
+            break;
+        case BLE_STATUS_CONNECTED:
+            lv_obj_set_style_bg_color(dot_ble, lv_color_hex(0x00FF00), 0);
+            lv_label_set_text(label_ble_status, "BLE CONN");
+            break;
     }
 
-    if (!data || !data->valid) {
-        lv_label_set_text(label_speed,    "--.-");
-        lv_label_set_text(label_time,     "--:--:--");
-        lv_label_set_text(label_avg,      "--.-");
-        lv_label_set_text(label_total,    "--.---");
-        lv_label_set_text(label_gradient, "--.-");
-        lv_label_set_text(label_ascent,   "---");
-        return;
+    switch (data.gps_status.gps_uart) {
+        case GPS_UART_STATUS_OFF:
+            lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF0000), 0);
+            lv_label_set_text(label_gps_status, "GPS OFF");
+            break;
+        case GPS_UART_STATUS_INVALID:
+            lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0xFF8800), 0);
+            lv_label_set_text(label_gps_status, "GPS NO FIX");
+            break;
+        case GPS_UART_STATUS_VALID:
+            lv_obj_set_style_bg_color(dot_gps, lv_color_hex(0x00FF00), 0);
+            lv_label_set_text(label_gps_status, "GPS OK");
+            break;
     }
 
     // Speed
-    snprintf(buf, sizeof(buf), "%.1f", data->speed_kmh);
-    lv_label_set_text(label_speed, buf);
+    if (data.valid_data)
+    {
+        snprintf(buf, sizeof(buf), "%.1f", data.speed_kmh);
+        lv_label_set_text(label_speed, buf);
+    }
+    else
+    {
+        lv_label_set_text(label_speed, "--.-");
+    }
 
     // Elapsed time from trip computer (seconds since reset)
-    uint32_t s = data->elapsed_sec;
+    uint32_t s = data.elapsed_sec;
     snprintf(buf, sizeof(buf), "%02lu:%02lu:%02lu",
              (unsigned long)(s / 3600),
              (unsigned long)((s % 3600) / 60),
@@ -251,18 +230,18 @@ void bike_ui_update(const trip_data_t *data, const ui_status_t *status)
     lv_label_set_text(label_time, buf);
 
     // Average speed
-    snprintf(buf, sizeof(buf), "%.1f", data->avg_speed_kmh);
+    snprintf(buf, sizeof(buf), "%.1f", data.avg_speed_kmh);
     lv_label_set_text(label_avg, buf);
 
     // Total distance
-    snprintf(buf, sizeof(buf), "%.3f", data->distance_km);
+    snprintf(buf, sizeof(buf), "%.3f", data.distance_km);
     lv_label_set_text(label_total, buf);
 
     // Gradient
-    snprintf(buf, sizeof(buf), "%.1f", data->gradient_pct);
+    snprintf(buf, sizeof(buf), "%.1f", data.gradient_pct);
     lv_label_set_text(label_gradient, buf);
 
     // Ascent
-    snprintf(buf, sizeof(buf), "%.0f", data->ascent_m);
+    snprintf(buf, sizeof(buf), "%d", (int)data.ascent_m);
     lv_label_set_text(label_ascent, buf);
 }

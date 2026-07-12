@@ -9,21 +9,40 @@
 extern "C" {
 #endif
 
+typedef enum {
+    BLE_STATUS_OFF = 0,
+    BLE_STATUS_ON,           /* advertising, no client */
+    BLE_STATUS_CONNECTED
+} gps_ble_status_t;
+
+typedef enum {
+    GPS_UART_STATUS_OFF = 0, /* no sentences arriving at all */
+    GPS_UART_STATUS_INVALID, /* sentences arriving but fix void */
+    GPS_UART_STATUS_VALID    /* valid fix within last 2 s */
+} gps_uart_status_t;
+
+typedef struct {
+    gps_ble_status_t  gps_ble;
+    gps_uart_status_t gps_uart;
+} gps_status_t;
+
 /**
  * Computed trip statistics, updated by trip_computer_update().
  * Read from any task via trip_computer_get_data().
  */
 typedef struct {
+    double  last_lat;
+    double  last_lon;
+    double  last_alt;
+    double  last_speed;
     float    speed_kmh;       /* current speed from latest fix          */
     float    avg_speed_kmh;   /* average speed (moving time only)       */
     float    distance_km;     /* total distance travelled               */
     float    gradient_pct;    /* current gradient % (smoothed, 5 fixes) */
     float    ascent_m;        /* cumulative positive altitude gain      */
     uint32_t elapsed_sec;     /* elapsed time since reset (wall clock)  */
-    bool     valid;           /* true once at least one fix processed   */
-    bool     gps_fix_lost;    /* true when fix has been absent > 2 s   */  // ADD THIS
-    uint8_t  ble_status;     // 0=off, 1=on/advertising, 2=connected
-    uint8_t  gps_uart_status; // 0=no data, 1=data but not valid, 2=valid <2s ago
+    gps_status_t  gps_status;  
+    bool valid_data;          /* true if data is valid */
 
 } trip_data_t;
 
@@ -38,13 +57,7 @@ void trip_computer_init(void);
  * Call from gps_task() every time s_gps_data is updated.
  * Thread-safe.
  */
-void trip_computer_update(const nmea_data_t *fix);
-
-/**
- * Copy the latest trip data into *out.
- * Thread-safe. Returns true if at least one fix has been processed.
- */
-bool trip_computer_get_data(trip_data_t *out);
+void trip_computer_update(void);
 
 /**
  * Reset all trip counters (distance, ascent, elapsed time, averages).
@@ -52,6 +65,18 @@ bool trip_computer_get_data(trip_data_t *out);
  * Thread-safe — safe to call from a UI button callback.
  */
 void trip_computer_reset(void);
+
+void trip_data_set_ble_status (gps_ble_status_t state);
+
+void trip_data_set_uart_status (gps_uart_status_t state);
+
+gps_ble_status_t trip_data_get_ble_status (void);
+
+gps_uart_status_t trip_data_get_uart_status (void);
+
+void trip_data_set_valid_data (bool value);
+
+bool trip_data_get_valid_data (void);
 
 #ifdef __cplusplus
 }

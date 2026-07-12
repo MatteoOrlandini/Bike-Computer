@@ -15,12 +15,6 @@ extern "C" {
 void ble_gps_init(void);
  
 /**
- * Copy the latest GPS fix into *out.
- * Thread-safe. Returns true if at least one valid fix has been received.
- */
-bool ble_gps_get_data(nmea_data_t *out);
- 
-/**
  * Returns true while a phone is actively connected over BLE.
  * Use this for the BLE > UART priority logic.
  */

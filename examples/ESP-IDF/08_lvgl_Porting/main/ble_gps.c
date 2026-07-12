@@ -89,22 +89,8 @@ static int gps_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     ble_hs_mbuf_to_flat(ctxt->om, sentence, len, NULL);
     sentence[len] = '\0';
 
-    /* Feed into the shared NMEA parser */
-    nmea_data_t tmp;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    tmp = s_nmea_data;                          /* start from current state */
-    xSemaphoreGive(s_mutex);
-
-    if (nmea_parse_sentence(sentence, &tmp)) {
-        xSemaphoreTake(s_mutex, portMAX_DELAY);
-        s_nmea_data = tmp;
-        xSemaphoreGive(s_mutex);
-        ESP_LOGI(TAG, "Parsed: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
-                 tmp.latitude, tmp.longitude, tmp.speed_kmh, tmp.altitude_m);
-        /*
-        ESP_LOGI(TAG, "Parsed: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
-                 tmp.latitude, tmp.longitude, tmp.speed_kmh, tmp.altitude_m);
-        */
+    if (nmea_parse_sentence(sentence, NMEA_SOURCE_BLE)) {
+        ESP_LOGI(TAG, "Parsed sentence : %s", sentence);
     } else {
         ESP_LOGW(TAG, "Failed to parse: %s", sentence);
     }
@@ -265,15 +251,6 @@ void ble_gps_init(void)
     nimble_port_freertos_init(nimble_host_task);
     s_ble_running = true;          // ADD this line
     ESP_LOGI(TAG, "BLE GPS service initialised");
-}
-
-bool ble_gps_get_data(nmea_data_t *out)
-{
-    if (!out) return false;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    *out = s_nmea_data;
-    xSemaphoreGive(s_mutex);
-    return out->valid;
 }
 
 bool ble_gps_is_connected(void)

@@ -1,17 +1,8 @@
 /*
  * nmea_uart.c  —  multi-UART NMEA source manager
  *
- * Manages two independent UART sources for the NEO-8M GPS module:
+ * Manages UART2  IO44(TX) / IO43(RX)
  *
- *   UART2  IO15(TX) / IO16(RX)  — direct TTL connection
- *   UART1  IO44(TX) / IO43(RX)  — RS485 terminal (SP3485EN, receive-only)
- *
- * Both UARTs run independent reader tasks that feed the same shared
- * nmea_data_t via the shared nmea_parser. Whichever source is physically
- * connected will update the state; the other produces no data and is
- * silently ignored. No priority arbitration needed.
- *
- * Thread-safe: a single mutex protects the shared nmea_data_t.
  */
 #ifdef TEST_GPS_BAUD_RATE
 // === TEMPORARY BAUDRATE AUTO-SCAN ===
@@ -26,6 +17,7 @@
 #endif
 #include "nmea_uart.h"
 #include "nmea_parser.h"
+#include "nmea_data.h"
 
 #include <string.h>
 #include "esp_log.h"
@@ -245,7 +237,6 @@ static const uint8_t UBX_CFG_MSG_TVG_OFF[] = {
 /*  Shared GPS state                                                    */
 /* ------------------------------------------------------------------ */
 
-static nmea_data_t       s_nmea_data;
 static SemaphoreHandle_t s_mutex;
 static char nmea_string[NMEA_BUF_SIZE];
 
@@ -354,18 +345,15 @@ void baudrate_autoscan_run(void)
  * sentence into *data.
  *
  * Only $GPRMC and $GPGGA are processed; all other sentence types are
- * silently ignored.  The function updates only the fields relevant to
- * the sentence type received, leaving the rest unchanged, so callers
- * should pass the same nmea_data_t across successive calls.
+ * silently ignored.  
  *
  * @param rx_byte   The received byte from serial port.
- * @param data      Output struct to update. Must not be NULL.
  * @return          true  if the sentence was recognised and its checksum
  *                        was valid (data has been updated).
  *                  false if the sentence was ignored, malformed, or had
  *                        a bad checksum (data is unchanged).
  */
-static bool uart_parse_data(const char rx_byte, nmea_data_t *data)
+static bool uart_parse_data(const char rx_byte, nmea_source_t source)
 {
     static int pos = 0;
     bool result = false;
@@ -386,21 +374,10 @@ static bool uart_parse_data(const char rx_byte, nmea_data_t *data)
         {
             nmea_string[pos] = '\0';
 
-            /* Read current state, parse into a copy, write back if valid */
-            nmea_data_t tmp;
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            tmp = *data;
-            xSemaphoreGive(s_mutex);
-
-            result = nmea_parse_sentence(nmea_string, &tmp);
+            result = nmea_parse_sentence(nmea_string, source);
             if (result) 
             {
-                xSemaphoreTake(s_mutex, portMAX_DELAY);
-                *data = tmp;
-                xSemaphoreGive(s_mutex);
-                ESP_LOGD(TAG, "NMEA UART Reader Task: lat=%.6f lon=%.6f spd=%.1f alt=%.1f",
-                            tmp.latitude, tmp.longitude,
-                            tmp.speed_kmh, tmp.altitude_m);
+                ESP_LOGD(TAG, "Parsed string: %s", nmea_string);
             }
 
             pos = 0;
@@ -423,7 +400,7 @@ static void uart_reader_task(void *arg)
         {
             for (int i = 0; i < len; i++)
             {
-                uart_parse_data(line[i], &s_nmea_data);
+                uart_parse_data(line[i], NMEA_SOURCE_UART);
             }
         }
     }
@@ -442,7 +419,6 @@ void nmea_uart_init(void)
 {
     s_mutex = xSemaphoreCreateMutex();
     assert(s_mutex);
-    memset(&s_nmea_data, 0, sizeof(s_nmea_data));
 
     const uart_config_t uart_cfg = {
         .baud_rate  = NMEA_UART_BAUD_RATE_115200,  // Set baud rate 
@@ -520,13 +496,4 @@ void nmea_uart_init(void)
                 NULL, NMEA_TASK_PRIO, NULL);
 
     ESP_LOGI(TAG, "Initialised NMEA UART Reader Task");
-}
-
-bool nmea_uart_get_data(nmea_data_t *out)
-{
-    if (!out) return false;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    *out = s_nmea_data;
-    xSemaphoreGive(s_mutex);
-    return out->valid;
 }

@@ -12,6 +12,8 @@
  */
 
 #include "trip_computer.h"
+#include "nmea_data.h"
+#include "bike_ui.h"
 
 #include <string.h>
 #include <math.h>
@@ -28,8 +30,8 @@
 /*  Tunable constants                                                   */
 /* ------------------------------------------------------------------ */
 
-#define MIN_SPEED_KMH        3.0f   /* ignore updates below this speed  */
-#define MIN_ALT_CHANGE_M     2.0f   /* ignore altitude changes below this */
+#define MIN_SPEED_KMH        0.0f   /* ignore updates below this speed  */
+#define MIN_ALT_CHANGE_M     0.0f   /* ignore altitude changes below this */
 #define GRADIENT_WINDOW      5      /* number of fixes to smooth gradient */
 #define EARTH_RADIUS_M       6371000.0  /* mean Earth radius, metres     */
 
@@ -37,37 +39,7 @@
 /*  Internal state                                                      */
 /* ------------------------------------------------------------------ */
 
-/* Gradient smoothing ring buffer — stores last N altitude/distance pairs */
-typedef struct {
-    float delta_alt_m;   /* altitude change for this segment (metres) */
-    float delta_dist_m;  /* horizontal distance for this segment (m)  */
-} gradient_sample_t;
-
-typedef struct {
-    /* Latest fix position (for delta calculations) */
-    double   last_lat;
-    double   last_lon;
-    float    last_alt_m;
-    bool     has_prev;          /* true once we have a previous fix     */
-
-    /* Trip accumulators */
-    float    distance_km;
-    float    ascent_m;
-    uint32_t moving_time_sec;   /* seconds spent above MIN_SPEED_KMH   */
-    int64_t  start_us;          /* esp_timer_get_time() at reset        */
-
-    /* Gradient smoothing */
-    gradient_sample_t grad_buf[GRADIENT_WINDOW];
-    int               grad_head;   /* next write index                  */
-    int               grad_count;  /* valid entries in buffer           */
-
-    /* Published output */
-    trip_data_t       data;
-
-    int64_t  last_valid_fix_us; /* esp_timer tick of last valid fix, for gap detection */  // ADD THIS
-} trip_state_t;
-
-static trip_state_t      s_state;
+static trip_data_t      trip_data;
 static SemaphoreHandle_t s_mutex;
 
 /* ------------------------------------------------------------------ */
@@ -76,13 +48,7 @@ static SemaphoreHandle_t s_mutex;
 
 static float haversine_m(double lat1, double lon1, double lat2, double lon2)
 {
-    double dlat = (lat2 - lat1) * M_PI / 180.0;
-    double dlon = (lon2 - lon1) * M_PI / 180.0;
-    double a = sin(dlat / 2) * sin(dlat / 2)
-             + cos(lat1 * M_PI / 180.0) * cos(lat2 * M_PI / 180.0)
-             * sin(dlon / 2) * sin(dlon / 2);
-    double c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
-    return (float)(EARTH_RADIUS_M * c);
+    return 0.0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -91,18 +57,7 @@ static float haversine_m(double lat1, double lon1, double lat2, double lon2)
 
 static float compute_smoothed_gradient(void)
 {
-    if (s_state.grad_count == 0) return 0.0f;
-
-    float total_alt  = 0.0f;
-    float total_dist = 0.0f;
-
-    for (int i = 0; i < s_state.grad_count; i++) {
-        total_alt  += s_state.grad_buf[i].delta_alt_m;
-        total_dist += s_state.grad_buf[i].delta_dist_m;
-    }
-
-    if (total_dist < 1.0f) return 0.0f;   /* avoid division by near-zero */
-    return (total_alt / total_dist) * 100.0f;
+    return 0.0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -112,22 +67,15 @@ static float compute_smoothed_gradient(void)
 static void reset_locked(void)
 {
     /* Preserve last known position and validity */
-    double last_lat  = s_state.last_lat;
-    double last_lon  = s_state.last_lon;
-    float  last_alt  = s_state.last_alt_m;
-    bool   has_prev  = s_state.has_prev;
-    bool   valid     = s_state.data.valid;
-    float  speed     = s_state.data.speed_kmh;
+    double last_lat  = trip_data.last_lat;
+    double last_lon  = trip_data.last_lon;
+    float  last_alt  = trip_data.last_alt;
 
-    memset(&s_state, 0, sizeof(s_state));
+    memset(&trip_data, 0, sizeof(trip_data));
 
-    s_state.last_lat   = last_lat;
-    s_state.last_lon   = last_lon;
-    s_state.last_alt_m = last_alt;
-    s_state.has_prev   = has_prev;
-    s_state.data.valid = valid;
-    s_state.data.speed_kmh = speed;
-    s_state.start_us   = esp_timer_get_time();
+    trip_data.last_lat   = last_lat;
+    trip_data.last_lon   = last_lon;
+    trip_data.last_alt  = last_alt;
 
     ESP_LOGI(TAG, "Trip reset");
 }
@@ -140,116 +88,57 @@ void trip_computer_init(void)
 {
     s_mutex = xSemaphoreCreateMutex();
     assert(s_mutex);
-    memset(&s_state, 0, sizeof(s_state));
-    s_state.start_us = esp_timer_get_time();
+    memset(&trip_data, 0, sizeof(trip_data));
     ESP_LOGI(TAG, "Trip computer initialised");
 }
 
-void trip_computer_update(const nmea_data_t *fix)
+void trip_computer_update(void)
 {
-    if (!fix) return;
-
     xSemaphoreTake(s_mutex, portMAX_DELAY);
+    double latitude;
+    double longitude;
+    float speed;
+    double altitude;
+    nmea_source_t source;
+    int64_t timestamp;
 
-    int64_t now_us = esp_timer_get_time();
+    if (trip_data_get_valid_data())
+    {
+        nmea_data_get_latitude(&latitude, &source, &timestamp);
+        nmea_data_get_longitude(&longitude, &source, &timestamp);
+        nmea_data_get_speed(&speed, &source, &timestamp);
+        nmea_data_get_altitude(&altitude, &source, &timestamp);
 
-    /* --- Handle lost fix --- */
-    if (!fix->valid) {
-        /* Only act if we previously had a fix and the timeout has elapsed */
-        if (s_state.last_valid_fix_us > 0 &&
-            (now_us - s_state.last_valid_fix_us) > FIX_TIMEOUT_US) {
-            s_state.data.speed_kmh  = 0.0f;   /* don't freeze last speed */
-            s_state.data.gps_fix_lost = true;
-            s_state.has_prev = false;          /* force reference reset on next valid fix */
+        /* ---- Distance ---- */
+        if ((trip_data.last_lat != 0) && (trip_data.last_lon != 0))
+        {
+            float dist_m = haversine_m(trip_data.last_lat, trip_data.last_lon,
+                                        latitude,   longitude);
+            trip_data.distance_km      += dist_m / 1000.0f;
         }
+
+        trip_data.avg_speed_kmh = (trip_data.speed_kmh + trip_data.avg_speed_kmh) / 2;
+
+        /* ---- Altitude & gradient ---- */
+        float delta_alt = altitude - trip_data.last_alt;
+
+        /* Ascent: count only gains above noise threshold */
+        if (delta_alt > MIN_ALT_CHANGE_M) {
+            trip_data.ascent_m  += delta_alt;
+        }
+
+
+        trip_data.gradient_pct = compute_smoothed_gradient();
+
+        /* ---- Advance position ---- */
+        trip_data.last_lat   = latitude;
+        trip_data.last_lon   = longitude;
+        trip_data.last_alt = altitude;
+
         xSemaphoreGive(s_mutex);
-        return;
     }
 
-    /* --- Valid fix from here --- */
-
-    /* Detect gap since last valid fix — reset reference point silently */
-    if (s_state.last_valid_fix_us > 0 &&
-        (now_us - s_state.last_valid_fix_us) > FIX_TIMEOUT_US) {
-        ESP_LOGW(TAG, "GPS gap >2s, resetting reference point");
-        s_state.has_prev  = false;
-        /* Clear stale gradient samples — they span the gap */
-        memset(s_state.grad_buf, 0, sizeof(s_state.grad_buf));
-        s_state.grad_head  = 0;
-        s_state.grad_count = 0;
-    }
-
-    s_state.last_valid_fix_us   = now_us;
-    s_state.data.gps_fix_lost   = false;
-    s_state.data.speed_kmh      = fix->speed_kmh;
-    s_state.data.valid          = true;
-
-    /* Elapsed time — only ticks while we have a valid fix */
-    s_state.data.elapsed_sec =
-        (uint32_t)((now_us - s_state.start_us) / 1000000LL);
-
-    /* Skip movement calculations below minimum speed */
-    if (fix->speed_kmh < MIN_SPEED_KMH) {
-        s_state.has_prev = false;
-        xSemaphoreGive(s_mutex);
-        return;
-    }
-
-    if (!s_state.has_prev) {
-        /* First fix above threshold — record position, nothing to compute */
-        s_state.last_lat   = fix->latitude;
-        s_state.last_lon   = fix->longitude;
-        s_state.last_alt_m = fix->altitude_m;
-        s_state.has_prev   = true;
-        xSemaphoreGive(s_mutex);
-        return;
-    }
-
-    /* ---- Distance ---- */
-    float dist_m = haversine_m(s_state.last_lat, s_state.last_lon,
-                                fix->latitude,   fix->longitude);
-    s_state.distance_km      += dist_m / 1000.0f;
-    s_state.data.distance_km  = s_state.distance_km;
-
-    /* ---- Moving time & average speed ---- */
-    s_state.moving_time_sec++;   /* one fix ≈ one second at 1 Hz */
-    if (s_state.moving_time_sec > 0) {
-        s_state.data.avg_speed_kmh =
-            (s_state.distance_km / (float)s_state.moving_time_sec) * 3600.0f;
-    }
-
-    /* ---- Altitude & gradient ---- */
-    float delta_alt = fix->altitude_m - s_state.last_alt_m;
-
-    /* Ascent: count only gains above noise threshold */
-    if (delta_alt > MIN_ALT_CHANGE_M) {
-        s_state.ascent_m      += delta_alt;
-        s_state.data.ascent_m  = s_state.ascent_m;
-    }
-
-    /* Gradient smoothing ring buffer */
-    s_state.grad_buf[s_state.grad_head].delta_alt_m  = delta_alt;
-    s_state.grad_buf[s_state.grad_head].delta_dist_m = dist_m;
-    s_state.grad_head = (s_state.grad_head + 1) % GRADIENT_WINDOW;
-    if (s_state.grad_count < GRADIENT_WINDOW) s_state.grad_count++;
-
-    s_state.data.gradient_pct = compute_smoothed_gradient();
-
-    /* ---- Advance position ---- */
-    s_state.last_lat   = fix->latitude;
-    s_state.last_lon   = fix->longitude;
-    s_state.last_alt_m = fix->altitude_m;
-
-    xSemaphoreGive(s_mutex);
-}
-
-bool trip_computer_get_data(trip_data_t *out)
-{
-    if (!out) return false;
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    *out = s_state.data;
-    xSemaphoreGive(s_mutex);
-    return out->valid;
+    bike_ui_update(trip_data);
 }
 
 void trip_computer_reset(void)
@@ -257,4 +146,34 @@ void trip_computer_reset(void)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     reset_locked();
     xSemaphoreGive(s_mutex);
+}
+
+void trip_data_set_ble_status (gps_ble_status_t state)
+{
+    trip_data.gps_status.gps_ble = state;
+}
+
+gps_ble_status_t trip_data_get_ble_status (void)
+{
+    return trip_data.gps_status.gps_ble;
+}
+
+void trip_data_set_uart_status (gps_uart_status_t state)
+{
+    trip_data.gps_status.gps_uart = state;
+}
+
+gps_uart_status_t trip_data_get_uart_status (void)
+{
+    return trip_data.gps_status.gps_uart;
+}
+
+void trip_data_set_valid_data (bool value)
+{
+    trip_data.valid_data = value;
+}
+
+bool trip_data_get_valid_data (void)
+{
+    return trip_data.valid_data;
 }
