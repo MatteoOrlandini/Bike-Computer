@@ -7,6 +7,7 @@
 #include "waveshare_rgb_lcd_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "bike_ui.h"
 #include "ble_gps.h"
@@ -32,19 +33,21 @@ static void gps_task(void *arg)
         /* Data valid? */
         if (nmea_data_get_time(&hour, &minute, &second, &source, &timestamp))
         {
+            ESP_LOGI("GPS_TASK", "TIME OK");
             if (source == NMEA_SOURCE_UART)
             {
                 if (nmea_data_get_speed(&speed, &source, &timestamp))
                 {
+                    ESP_LOGI("GPS_TASK", "SPEED OK");
                     trip_data_set_valid_data(true);
                     /* UART held valid fixes for >2 s — promote it, kill BLE */
-                    ESP_LOGD("GPS_TASK", "UART GPS data valid — disabling BLE");
+                    ESP_LOGI("GPS_TASK", "UART GPS data valid — disabling BLE");
                     trip_data_set_uart_status(GPS_UART_STATUS_VALID);
                 }
                 else
                 {
                     /* UART held valid fixes for >2 s — promote it, kill BLE */
-                    ESP_LOGD("GPS_TASK", "UART GPS data invalid — disabling BLE");
+                    ESP_LOGI("GPS_TASK", "UART GPS data invalid — disabling BLE");
                     trip_data_set_uart_status(GPS_UART_STATUS_INVALID);
                 }
                 trip_data_set_ble_status(BLE_STATUS_OFF);
@@ -55,11 +58,11 @@ static void gps_task(void *arg)
                 if (nmea_data_get_speed(&speed, &source, &timestamp))
                 {
                     trip_data_set_valid_data(true);
-                    ESP_LOGD("GPS_TASK", "BLE GPS data valid");
+                    ESP_LOGI("GPS_TASK", "BLE GPS data valid");
                 }
                 else
                 {
-                    ESP_LOGD("GPS_TASK", "BLE GPS data invalid");
+                    ESP_LOGI("GPS_TASK", "BLE GPS data invalid");
                 }
                 trip_data_set_ble_status(BLE_STATUS_CONNECTED);
                 trip_data_set_uart_status(GPS_UART_STATUS_OFF);
@@ -68,7 +71,7 @@ static void gps_task(void *arg)
             {
                 trip_data_set_ble_status(BLE_STATUS_ON);
                 trip_data_set_uart_status(GPS_UART_STATUS_INVALID);
-                ESP_LOGD("GPS_TASK", "UART GPS fix lost — enabling BLE");
+                ESP_LOGI("GPS_TASK", "UART GPS fix lost — enabling BLE");
                 ble_gps_enable();
             }
         }
@@ -79,7 +82,7 @@ static void gps_task(void *arg)
             {
                 trip_data_set_ble_status(BLE_STATUS_ON);
                 trip_data_set_uart_status(GPS_UART_STATUS_INVALID);
-                ESP_LOGD("GPS_TASK", "UART GPS fix lost — enabling BLE");
+                ESP_LOGI("GPS_TASK", "UART GPS fix lost — enabling BLE");
                 ble_gps_enable();
             }
             else if (source == NMEA_SOURCE_BLE)
@@ -97,7 +100,7 @@ static void gps_task(void *arg)
         {
             trip_data_set_ble_status(BLE_STATUS_ON);
             trip_data_set_uart_status(GPS_UART_STATUS_OFF);
-            ESP_LOGD("GPS_TASK", "UART GPS fix lost — enabling BLE");
+            ESP_LOGI("GPS_TASK", "UART GPS fix lost — enabling BLE");
             ble_gps_enable();
         }
 
@@ -105,6 +108,9 @@ static void gps_task(void *arg)
         {
             last_valid_data_timestamp = timestamp;
         }
+        /*
+        @TODO: update ui in another task
+        */
         trip_computer_update();
         vTaskDelay(pdMS_TO_TICKS(100));
     }

@@ -1,5 +1,6 @@
 #include "nmea_data.h"
 #include "esp_timer.h"
+#include "esp_log.h"
 
 #define VALID_TIMESTAMP_TIME (2000000LL)
 
@@ -152,6 +153,8 @@ bool nmea_data_get_time(uint8_t* hour, uint8_t* minute, uint8_t* second, nmea_so
     *second = nmea_data.second;
     *timestamp = nmea_data.time_last_timestamp;
     int64_t now_us = esp_timer_get_time();
+    ESP_LOGI("nmea_data_get_time", "now: %lld", now_us);
+    ESP_LOGI("nmea_data_get_time", "last_time_stamp: %lld", nmea_data.time_last_timestamp);
     if ((nmea_data.time_source < NMEA_SOURCE_NUMBER_OF_SOURCE) && \
     (nmea_data.time_last_timestamp != INVALID_TIMESTAMP) && \
     ((now_us - nmea_data.time_last_timestamp) < VALID_TIMESTAMP_TIME))

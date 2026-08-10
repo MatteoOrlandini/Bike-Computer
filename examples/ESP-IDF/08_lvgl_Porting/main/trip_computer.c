@@ -102,11 +102,12 @@ void trip_computer_update(void)
     nmea_source_t source;
     int64_t timestamp;
 
-    if (trip_data_get_valid_data())
+    if (trip_data.valid_data)
     {
         nmea_data_get_latitude(&latitude, &source, &timestamp);
         nmea_data_get_longitude(&longitude, &source, &timestamp);
         nmea_data_get_speed(&speed, &source, &timestamp);
+        ESP_LOGD("trip_computer_update", "speed: %f", speed);
         nmea_data_get_altitude(&altitude, &source, &timestamp);
 
         /* ---- Distance ---- */
@@ -138,7 +139,7 @@ void trip_computer_update(void)
         xSemaphoreGive(s_mutex);
     }
 
-    bike_ui_update(trip_data);
+    //bike_ui_update(trip_data);
 }
 
 void trip_computer_reset(void)
@@ -176,4 +177,9 @@ void trip_data_set_valid_data (bool value)
 bool trip_data_get_valid_data (void)
 {
     return trip_data.valid_data;
+}
+
+trip_data_t trip_data_get_data(void)
+{
+    return trip_data;
 }

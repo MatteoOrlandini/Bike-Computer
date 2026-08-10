@@ -34,6 +34,15 @@ static void power_off_btn_cb(lv_event_t *e)
 }
 
 /* ------------------------------------------------------------------ */
+/*  LVGL timer — fires every second on the LVGL task                   */
+/* ------------------------------------------------------------------ */
+
+static void bike_ui_timer_cb(lv_timer_t *data)
+{
+    bike_ui_update();
+}
+
+/* ------------------------------------------------------------------ */
 /*  Init                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -169,14 +178,17 @@ void bike_ui_init(void)
     lv_obj_set_style_text_font(btn_power_off_label, &lv_font_montserrat_32, 0);
     lv_label_set_text(btn_power_off_label, "Stand by");
     lv_obj_center(btn_power_off_label);
+    // Start the 1-second refresh timer
+    lv_timer_create(bike_ui_timer_cb, 1000, NULL);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Update                                                              */
 /* ------------------------------------------------------------------ */
 
-void bike_ui_update(const trip_data_t data)
+void bike_ui_update(void)
 {
+    trip_data_t data = trip_data_get_data();
     char buf[32];
     
     /* --- BLE indicator --- */

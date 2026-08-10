@@ -6,6 +6,6 @@
 
 
 void bike_ui_init(void);
-void bike_ui_update(const trip_data_t data);
+void bike_ui_update(void);
 
 #endif

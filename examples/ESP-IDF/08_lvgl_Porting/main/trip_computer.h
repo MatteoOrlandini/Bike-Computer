@@ -78,6 +78,8 @@ void trip_data_set_valid_data (bool value);
 
 bool trip_data_get_valid_data (void);
 
+trip_data_t trip_data_get_data(void);
+
 #ifdef __cplusplus
 }
 #endif
