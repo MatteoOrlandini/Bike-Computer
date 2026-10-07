@@ -56,7 +56,7 @@ bool nmea_data_get_latitude(double* value, nmea_source_t* source, int64_t* times
     (nmea_data.latitude_last_timestamp != INVALID_TIMESTAMP) && \
     ((now_us - nmea_data.latitude_last_timestamp) < VALID_TIMESTAMP_TIME))
     {
-        *source = nmea_data.latitude;
+        *source = nmea_data.latitude_source;
         is_valid = true;
     }
     return is_valid;
