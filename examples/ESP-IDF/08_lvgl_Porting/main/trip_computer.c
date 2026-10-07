@@ -15,6 +15,7 @@
 #include "nmea_data.h"
 #include "bike_ui.h"
 
+#include <assert.h>
 #include <string.h>
 #include <math.h>
 #include "esp_log.h"
@@ -102,44 +103,45 @@ void trip_computer_update(void)
     nmea_source_t source;
     int64_t timestamp;
 
-    if (trip_data.valid_data)
+    if (!trip_data.valid_data)
     {
-        nmea_data_get_latitude(&latitude, &source, &timestamp);
-        nmea_data_get_longitude(&longitude, &source, &timestamp);
-        nmea_data_get_speed(&speed, &source, &timestamp);
-        ESP_LOGD("trip_computer_update", "speed: %f", speed);
-        nmea_data_get_altitude(&altitude, &source, &timestamp);
-
-        /* ---- Distance ---- */
-        if ((trip_data.last_lat != 0) && (trip_data.last_lon != 0))
-        {
-            float dist_m = haversine_m(trip_data.last_lat, trip_data.last_lon,
-                                        latitude,   longitude);
-            trip_data.distance_km      += dist_m / 1000.0f;
-        }
-
-        trip_data.avg_speed_kmh = (trip_data.speed_kmh + trip_data.avg_speed_kmh) / 2;
-
-        /* ---- Altitude & gradient ---- */
-        float delta_alt = altitude - trip_data.last_alt;
-
-        /* Ascent: count only gains above noise threshold */
-        if (delta_alt > MIN_ALT_CHANGE_M) {
-            trip_data.ascent_m  += delta_alt;
-        }
-
-
-        trip_data.gradient_pct = compute_smoothed_gradient();
-
-        /* ---- Advance position ---- */
-        trip_data.last_lat   = latitude;
-        trip_data.last_lon   = longitude;
-        trip_data.last_alt = altitude;
-
         xSemaphoreGive(s_mutex);
+        return;
     }
 
-    //bike_ui_update(trip_data);
+    nmea_data_get_latitude(&latitude, &source, &timestamp);
+    nmea_data_get_longitude(&longitude, &source, &timestamp);
+    nmea_data_get_speed(&speed, &source, &timestamp);
+    ESP_LOGD("trip_computer_update", "speed: %f", speed);
+    nmea_data_get_altitude(&altitude, &source, &timestamp);
+
+    /* ---- Distance ---- */
+    if ((trip_data.last_lat != 0) && (trip_data.last_lon != 0))
+    {
+        float dist_m = haversine_m(trip_data.last_lat, trip_data.last_lon,
+                                    latitude,   longitude);
+        trip_data.distance_km      += dist_m / 1000.0f;
+    }
+
+    trip_data.speed_kmh = speed;
+    trip_data.avg_speed_kmh = (trip_data.speed_kmh + trip_data.avg_speed_kmh) / 2;
+
+    /* ---- Altitude & gradient ---- */
+    float delta_alt = altitude - trip_data.last_alt;
+
+    /* Ascent: count only gains above noise threshold */
+    if (delta_alt > MIN_ALT_CHANGE_M) {
+        trip_data.ascent_m  += delta_alt;
+    }
+
+    trip_data.gradient_pct = compute_smoothed_gradient();
+
+    /* ---- Advance position ---- */
+    trip_data.last_lat   = latitude;
+    trip_data.last_lon   = longitude;
+    trip_data.last_alt   = altitude;
+
+    xSemaphoreGive(s_mutex);
 }
 
 void trip_computer_reset(void)
@@ -151,35 +153,57 @@ void trip_computer_reset(void)
 
 void trip_data_set_ble_status (gps_ble_status_t state)
 {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
     trip_data.gps_status.gps_ble = state;
+    xSemaphoreGive(s_mutex);
 }
 
 gps_ble_status_t trip_data_get_ble_status (void)
 {
-    return trip_data.gps_status.gps_ble;
+    gps_ble_status_t state;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    state = trip_data.gps_status.gps_ble;
+    xSemaphoreGive(s_mutex);
+    return state;
 }
 
 void trip_data_set_uart_status (gps_uart_status_t state)
 {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
     trip_data.gps_status.gps_uart = state;
+    xSemaphoreGive(s_mutex);
 }
 
 gps_uart_status_t trip_data_get_uart_status (void)
 {
-    return trip_data.gps_status.gps_uart;
+    gps_uart_status_t state;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    state = trip_data.gps_status.gps_uart;
+    xSemaphoreGive(s_mutex);
+    return state;
 }
 
 void trip_data_set_valid_data (bool value)
 {
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
     trip_data.valid_data = value;
+    xSemaphoreGive(s_mutex);
 }
 
 bool trip_data_get_valid_data (void)
 {
-    return trip_data.valid_data;
+    bool value;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    value = trip_data.valid_data;
+    xSemaphoreGive(s_mutex);
+    return value;
 }
 
 trip_data_t trip_data_get_data(void)
 {
-    return trip_data;
+    trip_data_t snapshot;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    snapshot = trip_data;
+    xSemaphoreGive(s_mutex);
+    return snapshot;
 }
