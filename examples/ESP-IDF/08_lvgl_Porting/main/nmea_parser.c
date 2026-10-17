@@ -241,17 +241,17 @@ bool nmea_parse_sentence(const char *sentence, nmea_source_t source)
 
     if (strcmp(name, "RMC") == 0) 
     {
-        ESP_LOGI("nmea_parse_sentence", "RMC sentence: %s", sentence);
+        ESP_LOGD("nmea_parse_sentence", "RMC sentence: %s", sentence);
         return parse_gprmc(fields, count, source);
     }
     else if (strcmp(name, "GGA") == 0) 
     {
-        ESP_LOGI("nmea_parse_sentence", "GGA sentence: %s", sentence);
+        ESP_LOGD("nmea_parse_sentence", "GGA sentence: %s", sentence);
         return parse_gpgga(fields, count, source);
     }
     else
     {
-        ESP_LOGI("nmea_parse_sentence", "Other sentence: %s", sentence);
+        ESP_LOGD("nmea_parse_sentence", "Other sentence: %s", sentence);
     }
 
     return false;   /* unrecognised sentence type */

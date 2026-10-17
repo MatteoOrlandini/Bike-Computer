@@ -23,10 +23,10 @@ static void gps_apply_source_state(nmea_source_t source, bool has_valid_fix)
             trip_data_set_ble_status(BLE_STATUS_OFF);
             trip_data_set_uart_status(has_valid_fix ? GPS_UART_STATUS_VALID : GPS_UART_STATUS_INVALID);
             if (has_valid_fix) {
-                ESP_LOGI("GPS_TASK", "UART GPS data valid — disabling BLE");
+                ESP_LOGD("GPS_TASK", "UART GPS data valid — disabling BLE");
                 ble_gps_disable();
             } else {
-                ESP_LOGI("GPS_TASK", "UART GPS fix lost — enabling BLE");
+                ESP_LOGD("GPS_TASK", "UART GPS fix lost — enabling BLE");
                 ble_gps_enable();
             }
             break;
@@ -35,16 +35,16 @@ static void gps_apply_source_state(nmea_source_t source, bool has_valid_fix)
             trip_data_set_ble_status(BLE_STATUS_CONNECTED);
             trip_data_set_uart_status(GPS_UART_STATUS_OFF);
             if (has_valid_fix) {
-                ESP_LOGI("GPS_TASK", "BLE GPS data valid");
+                ESP_LOGD("GPS_TASK", "BLE GPS data valid");
             } else {
-                ESP_LOGI("GPS_TASK", "BLE GPS data invalid");
+                ESP_LOGD("GPS_TASK", "BLE GPS data invalid");
             }
             break;
 
         default:
             trip_data_set_ble_status(BLE_STATUS_ON);
             trip_data_set_uart_status(GPS_UART_STATUS_OFF);
-            ESP_LOGI("GPS_TASK", "No GPS source active — enabling BLE");
+            ESP_LOGD("GPS_TASK", "No GPS source active — enabling BLE");
             ble_gps_enable();
             break;
     }
@@ -63,7 +63,7 @@ static void gps_task(void *arg)
         trip_data_set_valid_data(false);
 
         if (nmea_data_get_time(&hour, &minute, &second, &source, &timestamp)) {
-            ESP_LOGI("GPS_TASK", "TIME OK");
+            ESP_LOGD("GPS_TASK", "TIME OK");
             const bool speed_valid = nmea_data_get_speed(&speed, &source, &timestamp);
 
             if (source == NMEA_SOURCE_UART || source == NMEA_SOURCE_BLE) {

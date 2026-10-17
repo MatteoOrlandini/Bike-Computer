@@ -90,7 +90,7 @@ static int gps_chr_access(uint16_t conn_handle, uint16_t attr_handle,
     sentence[len] = '\0';
 
     if (nmea_parse_sentence(sentence, NMEA_SOURCE_BLE)) {
-        ESP_LOGI(TAG, "Parsed sentence : %s", sentence);
+        ESP_LOGD(TAG, "Parsed sentence : %s", sentence);
     } else {
         ESP_LOGW(TAG, "Failed to parse: %s", sentence);
     }
@@ -128,7 +128,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_CONNECT:
         if (event->connect.status == 0) {
             s_connected = true;
-            ESP_LOGI(TAG, "Phone connected");
+            ESP_LOGD(TAG, "Phone connected");
             /* Request larger MTU so full NMEA sentences fit in one write */
             ble_gattc_exchange_mtu(event->connect.conn_handle, NULL, NULL);
         } else {
@@ -142,7 +142,7 @@ static int gap_event_handler(struct ble_gap_event *event, void *arg)
 
     case BLE_GAP_EVENT_DISCONNECT:
         s_connected = false;
-        ESP_LOGI(TAG, "Phone disconnected (reason %d)",
+        ESP_LOGD(TAG, "Phone disconnected (reason %d)",
                  event->disconnect.reason);
         /* restart advertising so the phone can reconnect */
         extern void ble_gps_start_advertising(void);
@@ -182,7 +182,7 @@ void ble_gps_start_advertising(void)
     if (rc != 0) {
         ESP_LOGE(TAG, "adv_start: %d", rc);
     } else {
-        ESP_LOGI(TAG, "Advertising as \"BikeGPS\"");
+        ESP_LOGD(TAG, "Advertising as \"BikeGPS\"");
     }
 }
 
@@ -250,7 +250,7 @@ void ble_gps_init(void)
 
     nimble_port_freertos_init(nimble_host_task);
     s_ble_running = true;          // ADD this line
-    ESP_LOGI(TAG, "BLE GPS service initialised");
+    ESP_LOGD(TAG, "BLE GPS service initialised");
 }
 
 bool ble_gps_is_connected(void)
@@ -262,7 +262,7 @@ void ble_gps_enable(void)
 {
     if (s_ble_running) return;
 
-    ESP_LOGI(TAG, "BLE enabling");
+    ESP_LOGD(TAG, "BLE enabling");
 
     ESP_ERROR_CHECK(nimble_port_init());
 
@@ -289,7 +289,7 @@ void ble_gps_disable(void)
 {
     if (!s_ble_running) return;
 
-    ESP_LOGI(TAG, "BLE disabling — UART GPS active");
+    ESP_LOGD(TAG, "BLE disabling — UART GPS active");
 
     /* Gracefully stop advertising and drop any active connection */
     if (ble_gap_adv_active()) {
